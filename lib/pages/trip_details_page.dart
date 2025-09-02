@@ -77,69 +77,30 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       print('=== DEBUGGING BOOKINGS ===');
       print('Loading bookings for scheduleId: ${widget.scheduleId}');
       print('Schedule data: ${widget.scheduleData}');
-      
-      // First, let's see what's in the bookings collection
-      final allBookingsSnapshot = await FirebaseFirestore.instance
-          .collection('bookings')
-          .get();
-      
-      print('Total bookings in collection: ${allBookingsSnapshot.docs.length}');
-      
-      // Check what scheduleId values exist
-      for (var doc in allBookingsSnapshot.docs) {
-        final data = doc.data();
-        print('Booking ${doc.id}: scheduleId = ${data['scheduleId']}, date = ${data['date']}, time = ${data['time']}, routeId = ${data['routeId']}');
-      }
-      
-      // Now try to find bookings with our specific scheduleId
+
+      // ONLY search by exact scheduleId - no fallback to date-only search
       var bookingsSnapshot = await FirebaseFirestore.instance
           .collection('bookings')
           .where('scheduleId', isEqualTo: widget.scheduleId)
+          .where(
+            'status',
+            whereIn: ['confirmed', 'pending'],
+          ) // Only confirmed/pending bookings
           .get();
 
-      print('Found ${bookingsSnapshot.docs.length} bookings with exact scheduleId match');
-      
-      // If no bookings found, try alternative approaches
+      print(
+        'Found ${bookingsSnapshot.docs.length} bookings with exact scheduleId match',
+      );
+
+      // If no bookings found, that's legitimate - this schedule has no bookings
       if (bookingsSnapshot.docs.isEmpty) {
-        print('No bookings found with exact scheduleId, trying alternative methods...');
-        
-        // Method 1: Try with date, time, and routeId
-        final scheduleDate = widget.scheduleData['date'];
-        final scheduleTime = widget.scheduleData['time'];
-        final scheduleRouteId = widget.scheduleData['routeId'];
-        
-        print('Searching by: date=$scheduleDate, time=$scheduleTime, routeId=$scheduleRouteId');
-        
-        Query query = FirebaseFirestore.instance.collection('bookings');
-        
-        if (scheduleDate != null) {
-          query = query.where('date', isEqualTo: scheduleDate);
-        }
-        if (scheduleTime != null) {
-          query = query.where('time', isEqualTo: scheduleTime);
-        }
-        
-        bookingsSnapshot = await query.get() as QuerySnapshot<Map<String, dynamic>>;
-        print('Found ${bookingsSnapshot.docs.length} bookings matching date/time');
-        
-        // If still no results, try just by date and routeId
-        if (bookingsSnapshot.docs.isEmpty && scheduleRouteId != null) {
-          bookingsSnapshot = await FirebaseFirestore.instance
-              .collection('bookings')
-              .where('date', isEqualTo: scheduleDate)
-              .where('routeId', isEqualTo: scheduleRouteId)
-              .get();
-          print('Found ${bookingsSnapshot.docs.length} bookings matching date/routeId');
-        }
-        
-        // If still no results, try just by date
-        if (bookingsSnapshot.docs.isEmpty) {
-          bookingsSnapshot = await FirebaseFirestore.instance
-              .collection('bookings')
-              .where('date', isEqualTo: scheduleDate)
-              .get();
-          print('Found ${bookingsSnapshot.docs.length} bookings matching just date');
-        }
+        print(
+          'No bookings found for this specific schedule - this is correct behavior',
+        );
+        setState(() {
+          bookings = [];
+        });
+        return;
       }
 
       List<Map<String, dynamic>> loadedBookings = [];
@@ -147,6 +108,12 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       for (var doc in bookingsSnapshot.docs) {
         final bookingData = doc.data();
         print('Processing booking: ${doc.id} with data: $bookingData');
+
+        // Verify this booking actually belongs to this schedule
+        if (bookingData['scheduleId'] != widget.scheduleId) {
+          print('Skipping booking ${doc.id} - scheduleId mismatch');
+          continue;
+        }
 
         // Fetch user data for each booking
         String passengerName = 'Unknown';
@@ -164,25 +131,12 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
             if (userDoc.exists) {
               final userData = userDoc.data() as Map<String, dynamic>;
               print('User data found: $userData');
-              passengerName = userData['name'] ?? userData['fullName'] ?? 'Unknown';
-              passengerPhone = userData['phone'] ?? '';
+              passengerName =
+                  userData['name'] ?? userData['fullName'] ?? 'Unknown';
+              passengerPhone =
+                  userData['phone'] ?? userData['phoneNumber'] ?? '';
             } else {
               print('User document does not exist for userId: $userId');
-              // Try to find user by email if available
-              final email = bookingData['userEmail'] ?? bookingData['email'];
-              if (email != null) {
-                final userQuery = await FirebaseFirestore.instance
-                    .collection('users')
-                    .where('email', isEqualTo: email)
-                    .limit(1)
-                    .get();
-                
-                if (userQuery.docs.isNotEmpty) {
-                  final userData = userQuery.docs.first.data();
-                  passengerName = userData['name'] ?? userData['fullName'] ?? 'Unknown';
-                  passengerPhone = userData['phone'] ?? '';
-                }
-              }
             }
           } catch (e) {
             print('Error loading user data for booking ${doc.id}: $e');
@@ -190,8 +144,10 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
         } else {
           print('No userId found in booking data');
           // Check if passenger name is directly in booking data
-          passengerName = bookingData['passengerName'] ?? bookingData['name'] ?? 'Unknown';
-          passengerPhone = bookingData['passengerPhone'] ?? bookingData['phone'] ?? '';
+          passengerName =
+              bookingData['passengerName'] ?? bookingData['name'] ?? 'Unknown';
+          passengerPhone =
+              bookingData['passengerPhone'] ?? bookingData['phone'] ?? '';
         }
 
         loadedBookings.add({
@@ -199,24 +155,36 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
           'userId': userId,
           'passengerName': passengerName,
           'passengerPhone': passengerPhone,
-          'selectedSeats': bookingData['selectedSeats'] ?? bookingData['seats'] ?? [],
-          'passengerCount': bookingData['passengerCount'] ?? bookingData['numberOfPassengers'] ?? 1,
-          'location': bookingData['location'] ?? bookingData['pickupLocation'] ?? 'Unknown',
+          'selectedSeats':
+              bookingData['selectedSeats'] ?? bookingData['seats'] ?? [],
+          'passengerCount':
+              bookingData['passengerCount'] ??
+              bookingData['numberOfPassengers'] ??
+              1,
+          'location':
+              bookingData['location'] ??
+              bookingData['pickupLocation'] ??
+              'Unknown',
           'pricePerSeat': bookingData['pricePerSeat'] ?? 0,
           'totalPrice': bookingData['totalPrice'] ?? bookingData['price'] ?? 0,
           'timestamp': bookingData['timestamp'] ?? bookingData['createdAt'],
           'status': bookingData['status'] ?? 'pending',
+          'scheduleId':
+              bookingData['scheduleId'], // Keep track of which schedule this belongs to
         });
       }
 
       print('Final loaded bookings count: ${loadedBookings.length}');
       print('Loaded bookings: $loadedBookings');
-      
+
       setState(() {
         bookings = loadedBookings;
       });
     } catch (e) {
       print('Error loading bookings: $e');
+      setState(() {
+        bookings = [];
+      });
     }
   }
 
@@ -413,7 +381,8 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
                     const SizedBox(height: 6),
 
                     // Phone Number
-                    if (booking['passengerPhone'] != null && booking['passengerPhone'].toString().isNotEmpty)
+                    if (booking['passengerPhone'] != null &&
+                        booking['passengerPhone'].toString().isNotEmpty)
                       Row(
                         children: [
                           Icon(Icons.phone, size: 16, color: Colors.grey[600]),
@@ -427,7 +396,8 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
                           ),
                         ],
                       ),
-                    if (booking['passengerPhone'] != null && booking['passengerPhone'].toString().isNotEmpty)
+                    if (booking['passengerPhone'] != null &&
+                        booking['passengerPhone'].toString().isNotEmpty)
                       const SizedBox(height: 6),
 
                     // Seat Number and Location in one row
@@ -450,7 +420,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
                           ),
                         ),
                         const SizedBox(width: 16),
-                        
+
                         // Location
                         Icon(
                           Icons.location_on,
@@ -553,9 +523,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(),
-        ),
+        builder: (context) => const Center(child: CircularProgressIndicator()),
       );
 
       // Update schedule status to completed
@@ -563,10 +531,10 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
           .collection('schedules')
           .doc(widget.scheduleId)
           .update({
-        'status': 'completed',
-        'completedAt': FieldValue.serverTimestamp(),
-        'checkedInPassengers': selectedBookings.toList(),
-      });
+            'status': 'completed',
+            'completedAt': FieldValue.serverTimestamp(),
+            'checkedInPassengers': selectedBookings.toList(),
+          });
 
       // Update booking statuses for selected passengers
       for (String bookingId in selectedBookings) {
@@ -574,15 +542,13 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
             .collection('bookings')
             .doc(bookingId)
             .update({
-          'status': 'checked_in',
-          'checkedInAt': FieldValue.serverTimestamp(),
-        });
+              'status': 'checked_in',
+              'checkedInAt': FieldValue.serverTimestamp(),
+            });
       }
 
       // Create history entry
-      await FirebaseFirestore.instance
-          .collection('trip_history')
-          .add({
+      await FirebaseFirestore.instance.collection('trip_history').add({
         'scheduleId': widget.scheduleId,
         'scheduleData': widget.scheduleData,
         'routeDisplay': routeDisplay,
@@ -611,15 +577,12 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       // Navigate to history page using direct navigation
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(
-          builder: (context) => const HistoryPage(),
-        ),
+        MaterialPageRoute(builder: (context) => const HistoryPage()),
       );
-
     } catch (e) {
       // Hide loading indicator
       Navigator.pop(context);
-      
+
       print('Error during check-in: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

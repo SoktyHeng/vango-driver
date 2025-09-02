@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class LoginPage extends StatefulWidget {
   final VoidCallback showRegisterPage;
@@ -21,6 +22,23 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
+  Future<Map<String, dynamic>?> _checkDriverStatus(String email) async {
+    try {
+      QuerySnapshot querySnapshot = await FirebaseFirestore.instance
+          .collection('drivers')
+          .where('email', isEqualTo: email)
+          .get();
+
+      if (querySnapshot.docs.isNotEmpty) {
+        return querySnapshot.docs.first.data() as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      print('Error checking driver status: $e');
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -36,11 +54,7 @@ class _LoginPageState extends State<LoginPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // Logo or App Name
-                  const Icon(
-                    Icons.local_taxi,
-                    size: 80,
-                    color: Colors.blue,
-                  ),
+                  const Icon(Icons.local_taxi, size: 80, color: Colors.blue),
                   const SizedBox(height: 16),
                   const Text(
                     'Driver Vango',
@@ -52,7 +66,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                   const SizedBox(height: 48),
-                  
+
                   // Email TextField
                   TextFormField(
                     controller: _emailController,
@@ -68,7 +82,10 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Colors.blue, width: 2),
+                        borderSide: const BorderSide(
+                          color: Colors.blue,
+                          width: 2,
+                        ),
                       ),
                       filled: true,
                       fillColor: Colors.white,
@@ -77,14 +94,16 @@ class _LoginPageState extends State<LoginPage> {
                       if (value == null || value.isEmpty) {
                         return 'Please enter your email';
                       }
-                      if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+                      if (!RegExp(
+                        r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                      ).hasMatch(value)) {
                         return 'Please enter a valid email';
                       }
                       return null;
                     },
                   ),
                   const SizedBox(height: 16),
-                  
+
                   // Password TextField
                   TextFormField(
                     controller: _passwordController,
@@ -100,7 +119,10 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Colors.blue, width: 2),
+                        borderSide: const BorderSide(
+                          color: Colors.blue,
+                          width: 2,
+                        ),
                       ),
                       filled: true,
                       fillColor: Colors.white,
@@ -116,14 +138,12 @@ class _LoginPageState extends State<LoginPage> {
                     },
                   ),
                   const SizedBox(height: 24),
-                  
+
                   // Forgot Password
                   Align(
                     alignment: Alignment.centerRight,
                     child: GestureDetector(
-                      onTap: () {
-                        
-                      },
+                      onTap: () {},
                       child: const Text(
                         'Forgot Password?',
                         style: TextStyle(color: Colors.blue),
@@ -131,7 +151,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  
+
                   // Login Button
                   ElevatedButton(
                     onPressed: () async {
@@ -146,24 +166,59 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                           );
 
-                          // Attempt to sign in
-                          await FirebaseAuth.instance.signInWithEmailAndPassword(
-                            email: _emailController.text.trim(),
-                            password: _passwordController.text.trim(),
-                          );
+                          // Check driver status first
+                          Map<String, dynamic>? driverData =
+                              await _checkDriverStatus(
+                                _emailController.text.trim(),
+                              );
+
+                          if (driverData != null &&
+                              driverData['status'] == 'pending') {
+                            // Close loading dialog
+                            if (!mounted) return;
+                            Navigator.pop(context);
+
+                            // Show pending approval dialog
+                            showDialog(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('Account Pending Approval'),
+                                backgroundColor: Colors.white,
+                                content: const Text(
+                                  'Your account registration is still pending admin approval. You will receive a notification once your account has been approved.',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context),
+                                    child: const Text('OK'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            return;
+                          }
+
+                          // If status is approved or no record found, proceed with Firebase Auth
+                          UserCredential userCredential = await FirebaseAuth
+                              .instance
+                              .signInWithEmailAndPassword(
+                                email: _emailController.text.trim(),
+                                password: _passwordController.text.trim(),
+                              );
 
                           // Close loading dialog
                           if (!mounted) return;
                           Navigator.pop(context);
 
-                          // Auth state listener will automatically handle navigation
+                          // Auth state listener will automatically handle navigation for approved users
                         } on FirebaseAuthException catch (e) {
                           // Close loading dialog
                           if (mounted) Navigator.pop(context);
-                          
+
                           String message = 'An error occurred';
                           if (e.code == 'user-not-found') {
-                            message = 'No user found for that email.';
+                            message =
+                                'No user found for that email. Please check if your account has been approved.';
                           } else if (e.code == 'wrong-password') {
                             message = 'Wrong password provided.';
                           } else if (e.code == 'invalid-email') {
@@ -171,17 +226,17 @@ class _LoginPageState extends State<LoginPage> {
                           } else if (e.code == 'user-disabled') {
                             message = 'This account has been disabled.';
                           }
-                          
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(message)),
-                          );
+
+                          ScaffoldMessenger.of(
+                            context,
+                          ).showSnackBar(SnackBar(content: Text(message)));
                         } catch (e) {
                           // Close loading dialog
                           if (mounted) Navigator.pop(context);
-                          
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Error: $e')),
-                          );
+
+                          ScaffoldMessenger.of(
+                            context,
+                          ).showSnackBar(SnackBar(content: Text('Error: $e')));
                         }
                       }
                     },
@@ -203,7 +258,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  
+
                   // Sign Up Option
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,

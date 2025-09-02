@@ -227,7 +227,9 @@ class _RegisterPageState extends State<RegisterPage> {
                                   margin: const EdgeInsets.only(right: 8),
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.grey[300]!),
+                                    border: Border.all(
+                                      color: Colors.grey[300]!,
+                                    ),
                                   ),
                                   child: ClipRRect(
                                     borderRadius: BorderRadius.circular(7),
@@ -375,9 +377,49 @@ class _RegisterPageState extends State<RegisterPage> {
                         }
 
                         try {
+                          // Show loading indicator with more visible styling
+                          showDialog(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (context) => Dialog(
+                              backgroundColor: Colors.transparent,
+                              child: Container(
+                                padding: const EdgeInsets.all(20),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: const [
+                                    CircularProgressIndicator(
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        Colors.blue,
+                                      ),
+                                    ),
+                                    SizedBox(height: 15),
+                                    Text(
+                                      'Creating your account...',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+
+                          print('Starting image upload...'); // Debug print
+
                           final licenseImageUrl = await uploadLicenseImage(
                             _licenseImage!,
                           );
+
+                          print(
+                            'Image uploaded, saving to Firestore...',
+                          ); // Debug print
 
                           await FirebaseFirestore.instance
                               .collection('drivers')
@@ -393,10 +435,17 @@ class _RegisterPageState extends State<RegisterPage> {
                                 'createdAt': Timestamp.now(),
                               });
 
+                          print('Data saved successfully'); // Debug print
+
+                          // Close loading indicator
                           if (!mounted) return;
+                          Navigator.pop(context);
+
+                          // Show success dialog
                           showDialog(
                             context: context,
                             builder: (context) => AlertDialog(
+                              backgroundColor: Colors.white,
                               title: const Text('Registration Submitted'),
                               content: const Text(
                                 'Your application is under review. You will be notified once approved.',
@@ -413,6 +462,11 @@ class _RegisterPageState extends State<RegisterPage> {
                             ),
                           );
                         } catch (e) {
+                          print('Error occurred: $e'); // Debug print
+
+                          // Close loading indicator if there's an error
+                          if (mounted) Navigator.pop(context);
+
                           ScaffoldMessenger.of(
                             context,
                           ).showSnackBar(SnackBar(content: Text('Error: $e')));
