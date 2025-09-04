@@ -11,6 +11,7 @@ class HistoryPage extends StatefulWidget {
 class _HistoryPageState extends State<HistoryPage> {
   List<Map<String, dynamic>> historyTrips = [];
   bool isLoading = true;
+  DateTime? selectedDate; // ✅ store filter date
 
   @override
   void initState() {
@@ -18,24 +19,33 @@ class _HistoryPageState extends State<HistoryPage> {
     _loadTripHistory();
   }
 
-  Future<void> _loadTripHistory() async {
+  Future<void> _loadTripHistory({DateTime? filterDate}) async {
     try {
       setState(() {
         isLoading = true;
       });
 
-      final historySnapshot = await FirebaseFirestore.instance
+      Query query = FirebaseFirestore.instance
           .collection('trip_history')
-          .orderBy('completedAt', descending: true)
-          .get();
+          .orderBy('completedAt', descending: true);
+
+      // ✅ If a specific date is selected, filter trips for that day
+      if (filterDate != null) {
+        DateTime startOfDay = DateTime(filterDate.year, filterDate.month, filterDate.day);
+        DateTime endOfDay = startOfDay.add(const Duration(days: 1));
+
+        query = query
+            .where('completedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+            .where('completedAt', isLessThan: Timestamp.fromDate(endOfDay));
+      }
+
+      final historySnapshot = await query.get();
 
       List<Map<String, dynamic>> trips = [];
-      
       for (var doc in historySnapshot.docs) {
-        final data = doc.data();
         trips.add({
           'id': doc.id,
-          ...data,
+          ...doc.data() as Map<String, dynamic>,
         });
       }
 
@@ -51,6 +61,23 @@ class _HistoryPageState extends State<HistoryPage> {
     }
   }
 
+  // ✅ Date Picker
+  Future<void> _pickDate() async {
+    DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: selectedDate ?? DateTime.now(),
+      firstDate: DateTime(2023),
+      lastDate: DateTime.now(),
+    );
+
+    if (picked != null) {
+      setState(() {
+        selectedDate = picked;
+      });
+      _loadTripHistory(filterDate: picked);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -59,6 +86,24 @@ class _HistoryPageState extends State<HistoryPage> {
         title: const Text('Trip History', style: TextStyle(fontSize: 20)),
         backgroundColor: Colors.white,
         centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.calendar_today, color: Colors.blue),
+            onPressed: _pickDate,
+            tooltip: "Filter by date",
+          ),
+          if (selectedDate != null)
+            IconButton(
+              icon: const Icon(Icons.clear, color: Colors.red),
+              onPressed: () {
+                setState(() {
+                  selectedDate = null;
+                });
+                _loadTripHistory(); // reload all trips
+              },
+              tooltip: "Clear filter",
+            ),
+        ],
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -73,27 +118,18 @@ class _HistoryPageState extends State<HistoryPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.history,
-            size: 80,
-            color: Colors.grey[400],
-          ),
+          Icon(Icons.history, size: 80, color: Colors.grey[400]),
           const SizedBox(height: 16),
           Text(
-            'No trip history yet',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w500,
-              color: Colors.grey[600],
-            ),
+            selectedDate != null
+                ? 'No trips found on ${selectedDate!.day}/${selectedDate!.month}/${selectedDate!.year}'
+                : 'No trip history yet',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: Colors.grey[600]),
           ),
           const SizedBox(height: 8),
           Text(
             'Completed trips will appear here',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[500],
-            ),
+            style: TextStyle(fontSize: 14, color: Colors.grey[500]),
           ),
         ],
       ),
@@ -116,7 +152,7 @@ class _HistoryPageState extends State<HistoryPage> {
     final completedAt = trip['completedAt'] as Timestamp?;
     final checkedInCount = trip['checkedInCount'] ?? 0;
     final totalPassengers = trip['totalPassengers'] ?? 0;
-    
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
@@ -144,19 +180,12 @@ class _HistoryPageState extends State<HistoryPage> {
                   children: [
                     Text(
                       trip['routeDisplay'] ?? 'Unknown Route',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87,
-                      ),
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black87),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       '${scheduleData['date']} • ${scheduleData['time']}',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[600],
-                      ),
+                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                     ),
                   ],
                 ),
@@ -169,18 +198,14 @@ class _HistoryPageState extends State<HistoryPage> {
                 ),
                 child: Text(
                   'Completed',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.green[700],
-                  ),
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.green[700]),
                 ),
               ),
             ],
           ),
-          
+
           const SizedBox(height: 12),
-          
+
           // Passenger Info
           Row(
             children: [
@@ -188,14 +213,11 @@ class _HistoryPageState extends State<HistoryPage> {
               const SizedBox(width: 8),
               Text(
                 'Checked in: $checkedInCount / $totalPassengers passengers',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[700],
-                ),
+                style: TextStyle(fontSize: 14, color: Colors.grey[700]),
               ),
             ],
           ),
-          
+
           if (completedAt != null) ...[
             const SizedBox(height: 8),
             Row(
@@ -204,10 +226,7 @@ class _HistoryPageState extends State<HistoryPage> {
                 const SizedBox(width: 8),
                 Text(
                   'Completed: ${_formatDateTime(completedAt)}',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[700],
-                  ),
+                  style: TextStyle(fontSize: 14, color: Colors.grey[700]),
                 ),
               ],
             ),
@@ -219,15 +238,7 @@ class _HistoryPageState extends State<HistoryPage> {
 
   String _formatDateTime(Timestamp timestamp) {
     final dateTime = timestamp.toDate();
-    final now = DateTime.now();
-    final difference = now.difference(dateTime);
-
-    if (difference.inDays == 0) {
-      return 'Today ${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
-    } else if (difference.inDays == 1) {
-      return 'Yesterday ${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
-    } else {
-      return '${dateTime.day}/${dateTime.month}/${dateTime.year} ${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
-    }
+    return '${dateTime.day}/${dateTime.month}/${dateTime.year} ${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
 }
+

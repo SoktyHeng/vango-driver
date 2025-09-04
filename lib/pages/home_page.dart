@@ -253,129 +253,126 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildTodaySchedule() {
-    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+  final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('schedules')
-          .where('driverId', isEqualTo: currentDriverId)
-          .where('date', isEqualTo: today)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return _buildErrorWidget(
-            'Error loading today\'s schedule: ${snapshot.error}',
-          );
-        }
-
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Padding(
-            padding: EdgeInsets.all(20.0),
-            child: Center(child: CircularProgressIndicator()),
-          );
-        }
-
-        final allSchedules = snapshot.data?.docs ?? [];
-
-        final schedules = allSchedules.where((doc) {
-          final data = doc.data() as Map<String, dynamic>;
-          final status = data['status'];
-          return status != 'completed';
-        }).toList();
-
-        print('Today\'s active schedules found: ${schedules.length}');
-
-        if (schedules.isEmpty) {
-          return _buildEmptyScheduleWidget('No schedules for today');
-        }
-
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0),
-          child: Column(
-            children: schedules.map((doc) {
-              final schedule = doc.data() as Map<String, dynamic>;
-              // FIX: Use doc.id instead of setting scheduleId in the data
-              return _buildScheduleCard({
-                ...schedule,
-                'scheduleId': doc.id, // Pass the actual document ID
-              }, isToday: true);
-            }).toList(),
-          ),
+  return StreamBuilder<QuerySnapshot>(
+    stream: FirebaseFirestore.instance
+        .collection('schedules')
+        .where('driverId', isEqualTo: currentDriverId)
+        .where('date', isEqualTo: today)
+        .snapshots(),
+    builder: (context, snapshot) {
+      if (snapshot.hasError) {
+        return _buildErrorWidget(
+          'Error loading today\'s schedule: ${snapshot.error}',
         );
-      },
-    );
-  }
+      }
+
+      if (snapshot.connectionState == ConnectionState.waiting) {
+        return const Padding(
+          padding: EdgeInsets.all(20.0),
+          child: Center(child: CircularProgressIndicator()),
+        );
+      }
+
+      final allSchedules = snapshot.data?.docs ?? [];
+
+      // Exclude completed
+      final schedules = allSchedules.where((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return data['status'] != 'completed';
+      }).toList();
+
+      // Sort by time
+      schedules.sort((a, b) {
+        final aTime = (a.data() as Map<String, dynamic>)['time'] ?? '';
+        final bTime = (b.data() as Map<String, dynamic>)['time'] ?? '';
+        return aTime.compareTo(bTime);
+      });
+
+      // ✅ Take only 5
+      final limitedSchedules = schedules.take(5).toList();
+
+      if (limitedSchedules.isEmpty) {
+        return _buildEmptyScheduleWidget('No schedules for today');
+      }
+
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20.0),
+        child: Column(
+          children: limitedSchedules.map((doc) {
+            final schedule = doc.data() as Map<String, dynamic>;
+            schedule['scheduleId'] = doc.id;
+            return _buildScheduleCard(schedule, isToday: true);
+          }).toList(),
+        ),
+      );
+    },
+  );
+}
+
 
   Widget _buildUpcomingSchedules() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('schedules')
-          .where('driverId', isEqualTo: currentDriverId)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          print('Error loading upcoming schedules: ${snapshot.error}');
-          return _buildErrorWidget(
-            'Error loading upcoming schedules: ${snapshot.error}',
-          );
-        }
+  final today = DateTime.now();
+  final tomorrow = DateTime(today.year, today.month, today.day + 1);
+  final tomorrowStr = DateFormat('yyyy-MM-dd').format(tomorrow);
 
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Padding(
-            padding: EdgeInsets.all(20.0),
-            child: Center(child: CircularProgressIndicator()),
-          );
-        }
-
-        final allSchedules = snapshot.data?.docs ?? [];
-
-        // Filter upcoming schedules locally and exclude completed ones
-        final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-        final upcomingSchedules = allSchedules.where((doc) {
-          final schedule = doc.data() as Map<String, dynamic>;
-          final scheduleDate = schedule['date'] ?? '';
-          final status = schedule['status'];
-          return scheduleDate.compareTo(today) > 0 && status != 'completed';
-        }).toList();
-
-        // Sort by date and take only first 10
-        upcomingSchedules.sort((a, b) {
-          final aData = a.data() as Map<String, dynamic>;
-          final bData = b.data() as Map<String, dynamic>;
-          final aDate = aData['date'] ?? '';
-          final bDate = bData['date'] ?? '';
-          final dateCompare = aDate.compareTo(bDate);
-          if (dateCompare != 0) return dateCompare;
-
-          final aTime = aData['time'] ?? '';
-          final bTime = bData['time'] ?? '';
-          return aTime.compareTo(bTime);
-        });
-
-        final limitedSchedules = upcomingSchedules.take(10).toList();
-
-        print('Upcoming schedules found: ${limitedSchedules.length}');
-
-        if (limitedSchedules.isEmpty) {
-          return _buildEmptyScheduleWidget('No upcoming schedules');
-        }
-
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0),
-          child: Column(
-            children: limitedSchedules.map((doc) {
-              final schedule = doc.data() as Map<String, dynamic>;
-              // FIX: Use doc.id instead of setting scheduleId in the data
-              return _buildScheduleCard({
-                ...schedule,
-                'scheduleId': doc.id, // Pass the actual document ID
-              }, isToday: false);
-            }).toList(),
-          ),
+  return StreamBuilder<QuerySnapshot>(
+    stream: FirebaseFirestore.instance
+        .collection('schedules')
+        .where('driverId', isEqualTo: currentDriverId)
+        .where('date', isEqualTo: tomorrowStr)
+        .snapshots(),
+    builder: (context, snapshot) {
+      if (snapshot.hasError) {
+        return _buildErrorWidget(
+          'Error loading upcoming schedules: ${snapshot.error}',
         );
-      },
-    );
-  }
+      }
+
+      if (snapshot.connectionState == ConnectionState.waiting) {
+        return const Padding(
+          padding: EdgeInsets.all(20.0),
+          child: Center(child: CircularProgressIndicator()),
+        );
+      }
+
+      final allSchedules = snapshot.data?.docs ?? [];
+
+      // Exclude completed
+      final schedules = allSchedules.where((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return data['status'] != 'completed';
+      }).toList();
+
+      // Sort by time
+      schedules.sort((a, b) {
+        final aTime = (a.data() as Map<String, dynamic>)['time'] ?? '';
+        final bTime = (b.data() as Map<String, dynamic>)['time'] ?? '';
+        return aTime.compareTo(bTime);
+      });
+
+      // ✅ Take only 6
+      final limitedSchedules = schedules.take(6).toList();
+
+      if (limitedSchedules.isEmpty) {
+        return _buildEmptyScheduleWidget('No trips for tomorrow');
+      }
+
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20.0),
+        child: Column(
+          children: limitedSchedules.map((doc) {
+            final schedule = doc.data() as Map<String, dynamic>;
+            schedule['scheduleId'] = doc.id;
+            return _buildScheduleCard(schedule, isToday: false);
+          }).toList(),
+        ),
+      );
+    },
+  );
+}
+
 
   Widget _buildScheduleCard(
     Map<String, dynamic> schedule, {
@@ -401,15 +398,11 @@ class _HomePageState extends State<HomePage> {
 
     return GestureDetector(
       onTap: () {
-        // DEBUG: Print the scheduleId being passed
-        print('Navigating to TripDetailsPage with scheduleId: "$scheduleId"');
-        print('Schedule data: $schedule');
-
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => TripDetailsPage(
-              scheduleId: scheduleId, // This should be the document ID
+              scheduleId: scheduleId,
               scheduleData: schedule,
             ),
           ),
@@ -604,11 +597,7 @@ class _HomePageState extends State<HomePage> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        _buildSeatInfo(
-                          'Total',
-                          seatsTotal.toString(),
-                          Colors.blue,
-                        ),
+                        _buildSeatInfo('Total', seatsTotal.toString(), Colors.blue),
                         _buildSeatInfo(
                           'Taken',
                           seatsTaken.toString(),
@@ -632,12 +621,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   // Add this new method to calculate taken seats by counting actual bookings
-  Future<int> _calculateTakenSeats(
-    String scheduleId,
-    String date,
-    String time,
-    String routeId,
-  ) async {
+  Future<int> _calculateTakenSeats(String scheduleId, String date, String time, String routeId) async {
     try {
       int totalTaken = 0;
 
@@ -647,106 +631,60 @@ class _HomePageState extends State<HomePage> {
           .where('scheduleId', isEqualTo: scheduleId)
           .get();
 
-      print(
-        'Found ${bookingsSnapshot.docs.length} bookings with exact scheduleId for $scheduleId',
-      );
+      print('Found ${bookingsSnapshot.docs.length} bookings with exact scheduleId for $scheduleId');
 
-      // Strategy 2: If no exact match, find by date, time, AND route
+      // Strategy 2: If no exact match, find by date, time, and route
       if (bookingsSnapshot.docs.isEmpty) {
-        print('No exact scheduleId match, trying date/time/route combination');
+        print('No exact scheduleId match, trying date/time/route');
+        
+        // First try date and time
+        bookingsSnapshot = await FirebaseFirestore.instance
+            .collection('bookings')
+            .where('date', isEqualTo: date)
+            .where('time', isEqualTo: time)
+            .get();
 
-        // First try with routeId
-        if (routeId.isNotEmpty && routeId != 'No route') {
-          bookingsSnapshot = await FirebaseFirestore.instance
-              .collection('bookings')
-              .where('date', isEqualTo: date)
-              .where('time', isEqualTo: time)
-              .where('routeId', isEqualTo: routeId)
-              .get();
+        print('Found ${bookingsSnapshot.docs.length} bookings matching date/time');
 
-          print(
-            'Found ${bookingsSnapshot.docs.length} bookings matching date/time/routeId',
-          );
-        }
-
-        // If still no results, try matching by route details (from/to)
-        if (bookingsSnapshot.docs.isEmpty) {
-          // Get route details from routes collection
-          String routeFrom = '';
-          String routeTo = '';
-
-          if (routeId.isNotEmpty && routeId != 'No route') {
-            try {
-              final routeDoc = await FirebaseFirestore.instance
-                  .collection('routes')
-                  .doc(routeId)
-                  .get();
-
-              if (routeDoc.exists) {
-                final routeData = routeDoc.data() as Map<String, dynamic>;
-                routeFrom = routeData['from'] ?? '';
-                routeTo = routeData['to'] ?? '';
-              }
-            } catch (e) {
-              print('Error getting route details: $e');
+        // Filter by route if we have multiple results
+        if (bookingsSnapshot.docs.length > 1 && routeId.isNotEmpty) {
+          final filteredDocs = bookingsSnapshot.docs.where((doc) {
+            final bookingData = doc.data();
+            final bookingFrom = bookingData['from']?.toString().toLowerCase();
+            final bookingTo = bookingData['to']?.toString().toLowerCase();
+            
+            // Check if route matches
+            if (routeId == 'mega_au') {
+              return (bookingFrom == 'mega' && bookingTo == 'au');
             }
+            
+            return bookingData['routeId'] == routeId;
+          }).toList();
+          
+          // Count passengers from filtered bookings
+          for (var doc in filteredDocs) {
+            final bookingData = doc.data();
+            final passengerCount = bookingData['passengerCount'] ?? 1;
+            totalTaken += (passengerCount as int);
           }
-
-          // Try to find bookings with matching from/to locations
-          if (routeFrom.isNotEmpty && routeTo.isNotEmpty) {
-            bookingsSnapshot = await FirebaseFirestore.instance
-                .collection('bookings')
-                .where('date', isEqualTo: date)
-                .where('time', isEqualTo: time)
-                .get();
-
-            // Filter by route manually
-            final filteredDocs = bookingsSnapshot.docs.where((doc) {
-              final bookingData = doc.data();
-              final bookingFrom = bookingData['from']?.toString().toLowerCase();
-              final bookingTo = bookingData['to']?.toString().toLowerCase();
-
-              return (bookingFrom == routeFrom.toLowerCase() &&
-                  bookingTo == routeTo.toLowerCase());
-            }).toList();
-
-            print(
-              'Found ${filteredDocs.length} bookings matching date/time/from/to after filtering',
-            );
-
-            // Count passengers from filtered bookings only
-            for (var doc in filteredDocs) {
-              final bookingData = doc.data();
-              final status = bookingData['status'] ?? '';
-
-              // Only count active bookings (not cancelled)
-              if (status != 'cancelled' && status != 'completed') {
-                final passengerCount = bookingData['passengerCount'] ?? 1;
-                totalTaken += (passengerCount as int);
-              }
-            }
-
-            print('Total taken seats after filtering: $totalTaken');
-            return totalTaken;
+        } else {
+          // Count passengers from all matching bookings
+          for (var doc in bookingsSnapshot.docs) {
+            final bookingData = doc.data();
+            final passengerCount = bookingData['passengerCount'] ?? 1;
+            totalTaken += (passengerCount as int);
           }
         }
-      }
-
-      // Count passengers from found bookings
-      for (var doc in bookingsSnapshot.docs) {
-        final bookingData = doc.data();
-        final status = bookingData['status'] ?? '';
-
-        // Only count active bookings (not cancelled or completed)
-        if (status != 'cancelled' && status != 'completed') {
+      } else {
+        // Count passengers from exact scheduleId matches
+        for (var doc in bookingsSnapshot.docs) {
+          final bookingData = doc.data();
           final passengerCount = bookingData['passengerCount'] ?? 1;
           totalTaken += (passengerCount as int);
         }
       }
 
-      print(
-        'Total taken seats calculated: $totalTaken for schedule $scheduleId',
-      );
+      print('Total taken seats calculated: $totalTaken for schedule $scheduleId');
       return totalTaken;
     } catch (e) {
       print('Error calculating taken seats: $e');

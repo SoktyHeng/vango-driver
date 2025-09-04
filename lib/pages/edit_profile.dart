@@ -278,8 +278,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
                                       fit: BoxFit.cover,
                                       loadingBuilder:
                                           (context, child, loadingProgress) {
-                                            if (loadingProgress == null)
+                                            if (loadingProgress == null) {
                                               return child;
+                                            }
                                             return Center(
                                               child: CircularProgressIndicator(
                                                 value:
@@ -494,3 +495,4 @@ class _EditProfilePageState extends State<EditProfilePage> {
     );
   }
 }
+

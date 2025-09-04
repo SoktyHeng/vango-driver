@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:driver_vango/pages/forgot_password_page.dart';
 
 class LoginPage extends StatefulWidget {
   final VoidCallback showRegisterPage;
@@ -137,20 +138,31 @@ class _LoginPageState extends State<LoginPage> {
                       return null;
                     },
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 12),
 
                   // Forgot Password
                   Align(
                     alignment: Alignment.centerRight,
                     child: GestureDetector(
-                      onTap: () {},
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const ForgotPasswordPage(),
+                          ),
+                        );
+                      },
                       child: const Text(
                         'Forgot Password?',
-                        style: TextStyle(color: Colors.blue),
+                        style: TextStyle(
+                          color: Colors.blue,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 32),
 
                   // Login Button
                   ElevatedButton(
@@ -174,7 +186,6 @@ class _LoginPageState extends State<LoginPage> {
 
                           if (driverData != null &&
                               driverData['status'] == 'pending') {
-                            // Close loading dialog
                             if (!mounted) return;
                             Navigator.pop(context);
 
@@ -198,21 +209,16 @@ class _LoginPageState extends State<LoginPage> {
                             return;
                           }
 
-                          // If status is approved or no record found, proceed with Firebase Auth
-                          UserCredential userCredential = await FirebaseAuth
-                              .instance
+                          // Proceed with Firebase Auth
+                          await FirebaseAuth.instance
                               .signInWithEmailAndPassword(
-                                email: _emailController.text.trim(),
-                                password: _passwordController.text.trim(),
-                              );
+                            email: _emailController.text.trim(),
+                            password: _passwordController.text.trim(),
+                          );
 
-                          // Close loading dialog
                           if (!mounted) return;
-                          Navigator.pop(context);
-
-                          // Auth state listener will automatically handle navigation for approved users
+                          Navigator.pop(context); // close loading
                         } on FirebaseAuthException catch (e) {
-                          // Close loading dialog
                           if (mounted) Navigator.pop(context);
 
                           String message = 'An error occurred';
@@ -227,16 +233,15 @@ class _LoginPageState extends State<LoginPage> {
                             message = 'This account has been disabled.';
                           }
 
-                          ScaffoldMessenger.of(
-                            context,
-                          ).showSnackBar(SnackBar(content: Text(message)));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(message)),
+                          );
                         } catch (e) {
-                          // Close loading dialog
                           if (mounted) Navigator.pop(context);
 
-                          ScaffoldMessenger.of(
-                            context,
-                          ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Error: $e')),
+                          );
                         }
                       }
                     },
@@ -267,11 +272,9 @@ class _LoginPageState extends State<LoginPage> {
                         "Don't have an account? ",
                         style: TextStyle(color: Colors.grey),
                       ),
-                      SizedBox(width: 10),
+                      const SizedBox(width: 8),
                       GestureDetector(
-                        onTap: () {
-                          widget.showRegisterPage();
-                        },
+                        onTap: widget.showRegisterPage,
                         child: const Text(
                           'Sign Up',
                           style: TextStyle(
@@ -291,3 +294,4 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 }
+
