@@ -87,7 +87,7 @@ class _ProfilePageState extends State<ProfilePage> {
           'My Profile',
           style: TextStyle(
             color: Colors.black87,
-            fontSize: 18,
+            fontSize: 20,
             fontWeight: FontWeight.w600,
           ),
         ),

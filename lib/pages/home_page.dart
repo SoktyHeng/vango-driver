@@ -253,126 +253,124 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildTodaySchedule() {
-  final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
-  return StreamBuilder<QuerySnapshot>(
-    stream: FirebaseFirestore.instance
-        .collection('schedules')
-        .where('driverId', isEqualTo: currentDriverId)
-        .where('date', isEqualTo: today)
-        .snapshots(),
-    builder: (context, snapshot) {
-      if (snapshot.hasError) {
-        return _buildErrorWidget(
-          'Error loading today\'s schedule: ${snapshot.error}',
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('schedules')
+          .where('driverId', isEqualTo: currentDriverId)
+          .where('date', isEqualTo: today)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _buildErrorWidget(
+            'Error loading today\'s schedule: ${snapshot.error}',
+          );
+        }
+
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.all(20.0),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final allSchedules = snapshot.data?.docs ?? [];
+
+        // Exclude completed
+        final schedules = allSchedules.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return data['status'] != 'completed';
+        }).toList();
+
+        // Sort by time
+        schedules.sort((a, b) {
+          final aTime = (a.data() as Map<String, dynamic>)['time'] ?? '';
+          final bTime = (b.data() as Map<String, dynamic>)['time'] ?? '';
+          return aTime.compareTo(bTime);
+        });
+
+        // ✅ Take only 5
+        final limitedSchedules = schedules.take(5).toList();
+
+        if (limitedSchedules.isEmpty) {
+          return _buildEmptyScheduleWidget('No schedules for today');
+        }
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0),
+          child: Column(
+            children: limitedSchedules.map((doc) {
+              final schedule = doc.data() as Map<String, dynamic>;
+              schedule['scheduleId'] = doc.id;
+              return _buildScheduleCard(schedule, isToday: true);
+            }).toList(),
+          ),
         );
-      }
-
-      if (snapshot.connectionState == ConnectionState.waiting) {
-        return const Padding(
-          padding: EdgeInsets.all(20.0),
-          child: Center(child: CircularProgressIndicator()),
-        );
-      }
-
-      final allSchedules = snapshot.data?.docs ?? [];
-
-      // Exclude completed
-      final schedules = allSchedules.where((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return data['status'] != 'completed';
-      }).toList();
-
-      // Sort by time
-      schedules.sort((a, b) {
-        final aTime = (a.data() as Map<String, dynamic>)['time'] ?? '';
-        final bTime = (b.data() as Map<String, dynamic>)['time'] ?? '';
-        return aTime.compareTo(bTime);
-      });
-
-      // ✅ Take only 5
-      final limitedSchedules = schedules.take(5).toList();
-
-      if (limitedSchedules.isEmpty) {
-        return _buildEmptyScheduleWidget('No schedules for today');
-      }
-
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20.0),
-        child: Column(
-          children: limitedSchedules.map((doc) {
-            final schedule = doc.data() as Map<String, dynamic>;
-            schedule['scheduleId'] = doc.id;
-            return _buildScheduleCard(schedule, isToday: true);
-          }).toList(),
-        ),
-      );
-    },
-  );
-}
-
+      },
+    );
+  }
 
   Widget _buildUpcomingSchedules() {
-  final today = DateTime.now();
-  final tomorrow = DateTime(today.year, today.month, today.day + 1);
-  final tomorrowStr = DateFormat('yyyy-MM-dd').format(tomorrow);
+    final today = DateTime.now();
+    final tomorrow = DateTime(today.year, today.month, today.day + 1);
+    final tomorrowStr = DateFormat('yyyy-MM-dd').format(tomorrow);
 
-  return StreamBuilder<QuerySnapshot>(
-    stream: FirebaseFirestore.instance
-        .collection('schedules')
-        .where('driverId', isEqualTo: currentDriverId)
-        .where('date', isEqualTo: tomorrowStr)
-        .snapshots(),
-    builder: (context, snapshot) {
-      if (snapshot.hasError) {
-        return _buildErrorWidget(
-          'Error loading upcoming schedules: ${snapshot.error}',
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('schedules')
+          .where('driverId', isEqualTo: currentDriverId)
+          .where('date', isEqualTo: tomorrowStr)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _buildErrorWidget(
+            'Error loading upcoming schedules: ${snapshot.error}',
+          );
+        }
+
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.all(20.0),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final allSchedules = snapshot.data?.docs ?? [];
+
+        // Exclude completed
+        final schedules = allSchedules.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return data['status'] != 'completed';
+        }).toList();
+
+        // Sort by time
+        schedules.sort((a, b) {
+          final aTime = (a.data() as Map<String, dynamic>)['time'] ?? '';
+          final bTime = (b.data() as Map<String, dynamic>)['time'] ?? '';
+          return aTime.compareTo(bTime);
+        });
+
+        // ✅ Take only 6
+        final limitedSchedules = schedules.take(6).toList();
+
+        if (limitedSchedules.isEmpty) {
+          return _buildEmptyScheduleWidget('No trips for tomorrow');
+        }
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0),
+          child: Column(
+            children: limitedSchedules.map((doc) {
+              final schedule = doc.data() as Map<String, dynamic>;
+              schedule['scheduleId'] = doc.id;
+              return _buildScheduleCard(schedule, isToday: false);
+            }).toList(),
+          ),
         );
-      }
-
-      if (snapshot.connectionState == ConnectionState.waiting) {
-        return const Padding(
-          padding: EdgeInsets.all(20.0),
-          child: Center(child: CircularProgressIndicator()),
-        );
-      }
-
-      final allSchedules = snapshot.data?.docs ?? [];
-
-      // Exclude completed
-      final schedules = allSchedules.where((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return data['status'] != 'completed';
-      }).toList();
-
-      // Sort by time
-      schedules.sort((a, b) {
-        final aTime = (a.data() as Map<String, dynamic>)['time'] ?? '';
-        final bTime = (b.data() as Map<String, dynamic>)['time'] ?? '';
-        return aTime.compareTo(bTime);
-      });
-
-      // ✅ Take only 6
-      final limitedSchedules = schedules.take(6).toList();
-
-      if (limitedSchedules.isEmpty) {
-        return _buildEmptyScheduleWidget('No trips for tomorrow');
-      }
-
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20.0),
-        child: Column(
-          children: limitedSchedules.map((doc) {
-            final schedule = doc.data() as Map<String, dynamic>;
-            schedule['scheduleId'] = doc.id;
-            return _buildScheduleCard(schedule, isToday: false);
-          }).toList(),
-        ),
-      );
-    },
-  );
-}
-
+      },
+    );
+  }
 
   Widget _buildScheduleCard(
     Map<String, dynamic> schedule, {
@@ -401,10 +399,8 @@ class _HomePageState extends State<HomePage> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => TripDetailsPage(
-              scheduleId: scheduleId,
-              scheduleData: schedule,
-            ),
+            builder: (context) =>
+                TripDetailsPage(scheduleId: scheduleId, scheduleData: schedule),
           ),
         );
       },
@@ -422,7 +418,10 @@ class _HomePageState extends State<HomePage> {
           ],
           border: isToday
               ? Border.all(color: Colors.blue[300]!, width: 2)
-              : null,
+              : Border.all(
+                  color: Colors.green[300]!,
+                  width: 1.5,
+                ), // Added border for upcoming schedules
         ),
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -439,11 +438,16 @@ class _HomePageState extends State<HomePage> {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: isToday ? Colors.blue[50] : Colors.grey[100],
+                      color: isToday
+                          ? Colors.blue[50]
+                          : Colors
+                                .green[50], // Changed background color for upcoming
                       borderRadius: BorderRadius.circular(20),
                       border: isToday
                           ? Border.all(color: Colors.blue[300]!)
-                          : null,
+                          : Border.all(
+                              color: Colors.green[300]!,
+                            ), // Added border for upcoming
                     ),
                     child: Text(
                       isToday
@@ -454,7 +458,10 @@ class _HomePageState extends State<HomePage> {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: isToday ? Colors.blue[700] : Colors.grey[600],
+                        color: isToday
+                            ? Colors.blue[700]
+                            : Colors
+                                  .green[700], // Changed text color for upcoming
                       ),
                     ),
                   ),
@@ -597,7 +604,11 @@ class _HomePageState extends State<HomePage> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        _buildSeatInfo('Total', seatsTotal.toString(), Colors.blue),
+                        _buildSeatInfo(
+                          'Total',
+                          seatsTotal.toString(),
+                          Colors.blue,
+                        ),
                         _buildSeatInfo(
                           'Taken',
                           seatsTaken.toString(),
@@ -621,7 +632,12 @@ class _HomePageState extends State<HomePage> {
   }
 
   // Add this new method to calculate taken seats by counting actual bookings
-  Future<int> _calculateTakenSeats(String scheduleId, String date, String time, String routeId) async {
+  Future<int> _calculateTakenSeats(
+    String scheduleId,
+    String date,
+    String time,
+    String routeId,
+  ) async {
     try {
       int totalTaken = 0;
 
@@ -631,12 +647,14 @@ class _HomePageState extends State<HomePage> {
           .where('scheduleId', isEqualTo: scheduleId)
           .get();
 
-      print('Found ${bookingsSnapshot.docs.length} bookings with exact scheduleId for $scheduleId');
+      print(
+        'Found ${bookingsSnapshot.docs.length} bookings with exact scheduleId for $scheduleId',
+      );
 
       // Strategy 2: If no exact match, find by date, time, and route
       if (bookingsSnapshot.docs.isEmpty) {
         print('No exact scheduleId match, trying date/time/route');
-        
+
         // First try date and time
         bookingsSnapshot = await FirebaseFirestore.instance
             .collection('bookings')
@@ -644,7 +662,9 @@ class _HomePageState extends State<HomePage> {
             .where('time', isEqualTo: time)
             .get();
 
-        print('Found ${bookingsSnapshot.docs.length} bookings matching date/time');
+        print(
+          'Found ${bookingsSnapshot.docs.length} bookings matching date/time',
+        );
 
         // Filter by route if we have multiple results
         if (bookingsSnapshot.docs.length > 1 && routeId.isNotEmpty) {
@@ -652,15 +672,15 @@ class _HomePageState extends State<HomePage> {
             final bookingData = doc.data();
             final bookingFrom = bookingData['from']?.toString().toLowerCase();
             final bookingTo = bookingData['to']?.toString().toLowerCase();
-            
+
             // Check if route matches
             if (routeId == 'mega_au') {
               return (bookingFrom == 'mega' && bookingTo == 'au');
             }
-            
+
             return bookingData['routeId'] == routeId;
           }).toList();
-          
+
           // Count passengers from filtered bookings
           for (var doc in filteredDocs) {
             final bookingData = doc.data();
@@ -684,7 +704,9 @@ class _HomePageState extends State<HomePage> {
         }
       }
 
-      print('Total taken seats calculated: $totalTaken for schedule $scheduleId');
+      print(
+        'Total taken seats calculated: $totalTaken for schedule $scheduleId',
+      );
       return totalTaken;
     } catch (e) {
       print('Error calculating taken seats: $e');

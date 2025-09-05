@@ -238,8 +238,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
           'Edit Profile',
           style: TextStyle(
             color: Colors.black87,
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
+            fontSize: 20,
+            
           ),
         ),
         centerTitle: true,

@@ -1,7 +1,9 @@
 import 'package:driver_vango/pages/history_page.dart';
+import 'package:driver_vango/services/location_service.dart'; // Import the location service
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class TripDetailsPage extends StatefulWidget {
   final String scheduleId;
@@ -23,10 +25,173 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
   Set<String> selectedBookings = {};
   bool isLoading = true;
 
+  // Location sharing variables
+  bool isLocationSharing = false;
+  String? currentDriverId;
+
+  // Global location service
+  final LocationService _locationService = LocationService();
+
   @override
   void initState() {
     super.initState();
+    _loadDriverData();
+    _checkLocationSharingStatus();
     _loadTripData();
+  }
+
+  @override
+  void dispose() {
+    // DON'T stop location sharing here - let it continue globally
+    super.dispose();
+  }
+
+  // Load current driver data
+  Future<void> _loadDriverData() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final querySnapshot = await FirebaseFirestore.instance
+            .collection('drivers')
+            .where('email', isEqualTo: user.email)
+            .limit(1)
+            .get();
+
+        if (querySnapshot.docs.isNotEmpty) {
+          setState(() {
+            currentDriverId = querySnapshot.docs.first.id;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading driver data: $e');
+    }
+  }
+
+  // Check if location sharing is already active
+  Future<void> _checkLocationSharingStatus() async {
+    try {
+      // Check both local service state and Firestore
+      final isTrackingThisSchedule = _locationService.isTrackingSchedule(
+        widget.scheduleId,
+      );
+
+      final doc = await FirebaseFirestore.instance
+          .collection('schedules')
+          .doc(widget.scheduleId)
+          .get();
+
+      bool firestoreStatus = false;
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
+        firestoreStatus = data['locationSharingActive'] ?? false;
+      }
+
+      // Also check if there's active location data
+      final locationDoc = await FirebaseFirestore.instance
+          .collection('driver_locations')
+          .doc(widget.scheduleId)
+          .get();
+
+      bool hasLocationData = locationDoc.exists;
+
+      // If Firestore says active but no location data, it means sharing stopped
+      if (firestoreStatus && !hasLocationData) {
+        firestoreStatus = false;
+        // Clean up stale status
+        await FirebaseFirestore.instance
+            .collection('schedules')
+            .doc(widget.scheduleId)
+            .update({'locationSharingActive': false});
+      }
+
+      // Use the more authoritative source (local service state)
+      final actualStatus =
+          isTrackingThisSchedule || (firestoreStatus && hasLocationData);
+
+      if (mounted) {
+        setState(() {
+          isLocationSharing = actualStatus;
+        });
+      }
+
+      print(
+        '📍 Location sharing status: local=$isTrackingThisSchedule, firestore=$firestoreStatus, hasData=$hasLocationData, final=$actualStatus',
+      );
+
+      // REMOVED: Auto-restart logic - let user manually start if needed
+    } catch (e) {
+      print('Error checking location sharing status: $e');
+      if (mounted) {
+        setState(() {
+          isLocationSharing = false;
+        });
+      }
+    }
+  }
+
+  // Start location sharing using global service
+  Future<void> _startLocationSharing() async {
+    if (currentDriverId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Driver ID not found'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    try {
+      await _locationService.startDriverLocationSharing(
+        widget.scheduleId,
+        currentDriverId!,
+      );
+
+      setState(() {
+        isLocationSharing = true;
+      });
+
+      // ScaffoldMessenger.of(context).showSnackBar(
+      //   const SnackBar(
+      //     content: Text(
+      //       'Location sharing started! This will continue in the background.',
+      //     ),
+      //     backgroundColor: Colors.green,
+      //   ),
+      // );
+    } catch (e) {
+      setState(() {
+        isLocationSharing = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to start location sharing: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Stop location sharing using global service
+  Future<void> _stopLocationSharing() async {
+    try {
+      await _locationService.stopLocationSharing();
+
+      setState(() {
+        isLocationSharing = false;
+      });
+
+      // ScaffoldMessenger.of(context).showSnackBar(
+      //   const SnackBar(
+      //     content: Text('📍 Location sharing stopped.'),
+      //     backgroundColor: Colors.orange,
+      //   ),
+      // );
+    } catch (e) {
+      print('Error stopping location sharing: $e');
+    }
   }
 
   Future<void> _loadTripData() async {
@@ -74,106 +239,105 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
   }
 
   Future<void> _loadBookings() async {
-  try {
-    print('=== DEBUGGING BOOKINGS ===');
-    print('Loading bookings for scheduleId: ${widget.scheduleId}');
-    print('Schedule data: ${widget.scheduleData}');
+    try {
+      print('=== DEBUGGING BOOKINGS ===');
+      print('Loading bookings for scheduleId: ${widget.scheduleId}');
+      print('Schedule data: ${widget.scheduleData}');
 
-    // Only search by exact scheduleId
-    var bookingsSnapshot = await FirebaseFirestore.instance
-        .collection('bookings')
-        .where('scheduleId', isEqualTo: widget.scheduleId)
-        .where(
-          'status',
-          whereIn: ['confirmed', 'pending'],
-        ) // Only confirmed/pending bookings
-        .get();
+      // Only search by exact scheduleId
+      var bookingsSnapshot = await FirebaseFirestore.instance
+          .collection('bookings')
+          .where('scheduleId', isEqualTo: widget.scheduleId)
+          .where(
+            'status',
+            whereIn: ['confirmed', 'pending'],
+          ) // Only confirmed/pending bookings
+          .get();
 
-    print(
-      'Found ${bookingsSnapshot.docs.length} bookings with exact scheduleId match',
-    );
+      print(
+        'Found ${bookingsSnapshot.docs.length} bookings with exact scheduleId match',
+      );
 
-    if (bookingsSnapshot.docs.isEmpty) {
-      print('No bookings found for this specific schedule - this is correct behavior');
+      if (bookingsSnapshot.docs.isEmpty) {
+        print(
+          'No bookings found for this specific schedule - this is correct behavior',
+        );
+        setState(() {
+          bookings = [];
+        });
+        return;
+      }
+
+      List<Map<String, dynamic>> loadedBookings = [];
+
+      for (var doc in bookingsSnapshot.docs) {
+        final bookingData = doc.data();
+        print('Processing booking: ${doc.id} with data: $bookingData');
+
+        if (bookingData['scheduleId'] != widget.scheduleId) continue;
+
+        String passengerName = 'Unknown';
+        String passengerPhone = '';
+        final userId = bookingData['userId'];
+
+        if (userId != null) {
+          try {
+            final userDoc = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(userId)
+                .get();
+
+            if (userDoc.exists) {
+              final userData = userDoc.data();
+              passengerName =
+                  userData?['name'] ?? userData?['fullName'] ?? 'Unknown';
+              passengerPhone = (userData?['phone number'] ?? '').toString();
+            }
+          } catch (e) {
+            print('Error loading user data for booking ${doc.id}: $e');
+          }
+        } else {
+          passengerName =
+              bookingData['passengerName'] ?? bookingData['name'] ?? 'Unknown';
+          passengerPhone = (bookingData['phone number'] ?? '').toString();
+        }
+
+        print('Booking: $passengerName, phone: $passengerPhone');
+
+        loadedBookings.add({
+          'id': doc.id,
+          'userId': userId,
+          'passengerName': passengerName,
+          'passengerPhone': passengerPhone,
+          'selectedSeats': bookingData['selectedSeats'] ?? [],
+          'passengerCount': bookingData['passengerCount'] ?? 1,
+          'location': bookingData['location'] ?? 'Unknown',
+          'pricePerSeat': bookingData['pricePerSeat'] ?? 0,
+          'totalPrice': bookingData['totalPrice'] ?? 0,
+          'timestamp': bookingData['timestamp'],
+          'status': bookingData['status'] ?? 'pending',
+          'scheduleId': bookingData['scheduleId'],
+          'isSelected': bookingData['isSelected'] ?? false,
+        });
+
+        if (bookingData['isSelected'] == true) {
+          selectedBookings.add(doc.id);
+        }
+      }
+
+      print('Final loaded bookings count: ${loadedBookings.length}');
+      print('Loaded bookings: $loadedBookings');
+
+      setState(() {
+        bookings = loadedBookings;
+      });
+    } catch (e) {
+      print('Error loading bookings: $e');
       setState(() {
         bookings = [];
       });
-      return;
     }
-
-    List<Map<String, dynamic>> loadedBookings = [];
-
-    for (var doc in bookingsSnapshot.docs) {
-      final bookingData = doc.data();
-      print('Processing booking: ${doc.id} with data: $bookingData');
-
-      if (bookingData['scheduleId'] != widget.scheduleId) continue;
-
-      String passengerName = 'Unknown';
-      String passengerPhone = '';
-      final userId = bookingData['userId'];
-
-      if (userId != null) {
-        try {
-          final userDoc = await FirebaseFirestore.instance
-              .collection('users')
-              .doc(userId)
-              .get();
-
-          if (userDoc.exists) {
-            final userData = userDoc.data();
-            passengerName =
-                userData?['name'] ?? userData?['fullName'] ?? 'Unknown';
-            passengerPhone =
-                (userData?['phone number'] ?? '').toString(); // <-- updated field
-          }
-        } catch (e) {
-          print('Error loading user data for booking ${doc.id}: $e');
-        }
-      } else {
-        passengerName =
-            bookingData['passengerName'] ?? bookingData['name'] ?? 'Unknown';
-        passengerPhone =
-            (bookingData['phone number'] ?? '').toString(); // <-- updated field
-      }
-
-      print('Booking: $passengerName, phone: $passengerPhone');
-
-      loadedBookings.add({
-        'id': doc.id,
-        'userId': userId,
-        'passengerName': passengerName,
-        'passengerPhone': passengerPhone,
-        'selectedSeats': bookingData['selectedSeats'] ?? [],
-        'passengerCount': bookingData['passengerCount'] ?? 1,
-        'location': bookingData['location'] ?? 'Unknown',
-        'pricePerSeat': bookingData['pricePerSeat'] ?? 0,
-        'totalPrice': bookingData['totalPrice'] ?? 0,
-        'timestamp': bookingData['timestamp'],
-        'status': bookingData['status'] ?? 'pending',
-        'scheduleId': bookingData['scheduleId'],
-        'isSelected': bookingData['isSelected'] ?? false,
-      });
-
-      if (bookingData['isSelected'] == true) {
-        selectedBookings.add(doc.id);
-      }
-    }
-
-    print('Final loaded bookings count: ${loadedBookings.length}');
-    print('Loaded bookings: $loadedBookings');
-
-    setState(() {
-      bookings = loadedBookings;
-    });
-  } catch (e) {
-    print('Error loading bookings: $e');
-    setState(() {
-      bookings = [];
-    });
   }
-}
-
 
   int get totalSeats => _parseToInt(widget.scheduleData['seatsTotal']) ?? 0;
   int get bookedSeats => bookings.fold(
@@ -191,36 +355,32 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
   }
 
   void _toggleBookingSelection(String bookingId) async {
-  final bookingIndex = bookings.indexWhere((b) => b['id'] == bookingId);
-  if (bookingIndex == -1) return;
+    final bookingIndex = bookings.indexWhere((b) => b['id'] == bookingId);
+    if (bookingIndex == -1) return;
 
-  final isNowSelected = !(selectedBookings.contains(bookingId));
+    final isNowSelected = !(selectedBookings.contains(bookingId));
 
-  setState(() {
-    if (isNowSelected) {
-      selectedBookings.add(bookingId);
-    } else {
-      selectedBookings.remove(bookingId);
-    }
+    setState(() {
+      if (isNowSelected) {
+        selectedBookings.add(bookingId);
+      } else {
+        selectedBookings.remove(bookingId);
+      }
 
-    // ✅ Also update local booking map so UI reflects immediately
-    bookings[bookingIndex]['isSelected'] = isNowSelected;
-  });
-
-  // ✅ Persist to Firestore
-  try {
-    await FirebaseFirestore.instance
-        .collection('bookings')
-        .doc(bookingId)
-        .update({
-      'isSelected': isNowSelected,
+      // Also update local booking map so UI reflects immediately
+      bookings[bookingIndex]['isSelected'] = isNowSelected;
     });
-  } catch (e) {
-    print("Error updating selection in Firestore: $e");
+
+    // Persist to Firestore
+    try {
+      await FirebaseFirestore.instance
+          .collection('bookings')
+          .doc(bookingId)
+          .update({'isSelected': isNowSelected});
+    } catch (e) {
+      print("Error updating selection in Firestore: $e");
+    }
   }
-}
-
-
 
   @override
   Widget build(BuildContext context) {
@@ -241,11 +401,65 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
           icon: const Icon(Icons.arrow_back, color: Colors.black87),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          // Location sharing toggle button
+          IconButton(
+            icon: Icon(
+              isLocationSharing ? Icons.location_on : Icons.location_off,
+              color: isLocationSharing ? Colors.green : Colors.grey,
+            ),
+            onPressed: () {
+              if (isLocationSharing) {
+                _showStopSharingDialog();
+              } else {
+                _startLocationSharing();
+              }
+            },
+            tooltip: isLocationSharing
+                ? 'Stop Location Sharing'
+                : 'Start Location Sharing',
+          ),
+        ],
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
+                // Location sharing status banner
+                if (isLocationSharing)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    color: Colors.green[50],
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.location_on,
+                          color: Colors.green[700],
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Location sharing active',
+                            style: TextStyle(
+                              color: Colors.green[700],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: _stopLocationSharing,
+                          child: Icon(
+                            Icons.close,
+                            color: Colors.green[700],
+                            size: 18,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
                 // Seat Capacity Section
                 _buildSeatCapacitySection(),
 
@@ -254,6 +468,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
 
                 // Bottom Buttons
                 _buildBottomButtons(),
+                SizedBox(height: 20),
               ],
             ),
     );
@@ -271,7 +486,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Seat Capacity = $totalSeats',
+            'Seat Capacity: $totalSeats',
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
@@ -301,19 +516,214 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
   }
 
   Widget _buildPassengersList() {
-  if (bookings.isEmpty) {
-    return Center(
+    if (bookings.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.people_outline, size: 64, color: Colors.grey[400]),
+            const SizedBox(height: 16),
+            Text(
+              'No passengers booked yet',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.grey[500],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      itemCount: bookings.length,
+      itemBuilder: (context, index) {
+        final booking = bookings[index];
+        final isSelected =
+            selectedBookings.contains(booking['id']) ||
+            (booking['isSelected'] == true);
+
+        final selectedSeats = booking['selectedSeats'] as List<dynamic>;
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.blue[50] : Colors.white,
+            border: Border.all(
+              color: isSelected ? Colors.blue[300]! : Colors.grey[200]!,
+              width: isSelected ? 2 : 1,
+            ),
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey[200]!.withOpacity(0.5),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Checkbox(
+                value: isSelected,
+                onChanged: (bool? value) {
+                  _toggleBookingSelection(booking['id']);
+                },
+                activeColor: Colors.blue[600],
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Left side: Name + Seat + Location
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Passenger Name
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.person,
+                                size: 18,
+                                color: Colors.blue[600],
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  booking['passengerName'],
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black87,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          // Seat Number and Location
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.airline_seat_recline_normal,
+                                size: 16,
+                                color: Colors.grey[600],
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                selectedSeats.isNotEmpty
+                                    ? 'Seat ${selectedSeats.join(', ')}'
+                                    : 'No seat',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey[700],
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Icon(
+                                Icons.location_on,
+                                size: 16,
+                                color: Colors.grey[600],
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  booking['location'] ?? 'Unknown',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.grey[700],
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Right side: circular phone icon
+                    GestureDetector(
+                      onTap: () async {
+                        final passengerPhone =
+                            booking['passengerPhone']?.toString() ?? '';
+                        if (passengerPhone.isEmpty) return;
+
+                        final uri = Uri(scheme: 'tel', path: passengerPhone);
+
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(
+                            uri,
+                            mode: LaunchMode.platformDefault,
+                          );
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Cannot launch phone dialer'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.blue[50],
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.blue[300]!,
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.phone,
+                          size: 20,
+                          color: Colors.blue[600],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildBottomButtons() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.people_outline, size: 64, color: Colors.grey[400]),
-          const SizedBox(height: 16),
-          Text(
-            'No passengers booked yet',
-            style: TextStyle(
-              fontSize: 16,
-              color: Colors.grey[500],
-              fontWeight: FontWeight.w500,
+          // Check in button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => _showCheckInDialog(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Check In Passengers',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
             ),
           ),
         ],
@@ -321,176 +731,35 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
     );
   }
 
-  return ListView.builder(
-    padding: const EdgeInsets.symmetric(horizontal: 20),
-    itemCount: bookings.length,
-    itemBuilder: (context, index) {
-      final booking = bookings[index];
-      final isSelected = selectedBookings.contains(booking['id']) ||
-          (booking['isSelected'] == true);
-
-      final selectedSeats = booking['selectedSeats'] as List<dynamic>;
-
-      return Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: isSelected ? Colors.blue[50] : Colors.white,
-          border: Border.all(
-            color: isSelected ? Colors.blue[300]! : Colors.grey[200]!,
-            width: isSelected ? 2 : 1,
+  void _showStopSharingDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          title: const Text('Stop Location Sharing'),
+          content: const Text(
+            'Are you sure you want to stop sharing your location? Passengers will no longer be able to track you.',
           ),
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey[200]!.withOpacity(0.5),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
             ),
-          ],
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Checkbox(
-              value: isSelected,
-              onChanged: (bool? value) {
-                _toggleBookingSelection(booking['id']);
-              },
-              activeColor: Colors.blue[600],
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-  child: Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      // Left side: Name + Seat + Location
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Passenger Name
-            Row(
-              children: [
-                Icon(Icons.person, size: 18, color: Colors.blue[600]),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    booking['passengerName'],
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            // Seat Number and Location
-            Row(
-              children: [
-                Icon(Icons.airline_seat_recline_normal,
-                    size: 16, color: Colors.grey[600]),
-                const SizedBox(width: 6),
-                Text(
-                  selectedSeats.isNotEmpty
-                      ? 'Seat ${selectedSeats.join(', ')}'
-                      : 'No seat',
-                  style: TextStyle(fontSize: 14, color: Colors.grey[700]),
-                ),
-                const SizedBox(width: 16),
-                Icon(Icons.location_on, size: 16, color: Colors.grey[600]),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    booking['location'] ?? 'Unknown',
-                    style: TextStyle(fontSize: 14, color: Colors.grey[700]),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-
-      // Right side: circular phone icon
-      GestureDetector(
-        onTap: () async {
-          final passengerPhone = booking['passengerPhone']?.toString() ?? '';
-          if (passengerPhone.isEmpty) return;
-
-          final uri = Uri(scheme: 'tel', path: passengerPhone);
-
-          if (await canLaunchUrl(uri)) {
-            await launchUrl(uri, mode: LaunchMode.platformDefault);
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Cannot launch phone dialer'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-        },
-        child: Container(
-          padding: const EdgeInsets.all(8), // circle size
-          decoration: BoxDecoration(
-            color: Colors.blue[50],
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.blue[300]!, width: 1.5),
-          ),
-          child: Icon(
-            Icons.phone,
-            size: 20,
-            color: Colors.blue[600],
-          ),
-        ),
-      ),
-    ],
-  ),
-),
-
-          ],
-        ),
-      );
-    },
-  );
-}
-
-
-  Widget _buildBottomButtons() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 50),
-      child: Row(
-        children: [
-          Expanded(
-            child: ElevatedButton(
+            ElevatedButton(
               onPressed: () {
-                // Check In functionality
-                _showCheckInDialog();
+                Navigator.pop(context);
+                _stopLocationSharing();
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.grey[200],
-                foregroundColor: Colors.black87,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
               ),
-              child: const Text(
-                'Check In',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
+              child: const Text('Stop Sharing'),
             ),
-          ),
-        ],
-      ),
+          ],
+        );
+      },
     );
   }
 
@@ -511,7 +780,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
         return AlertDialog(
           title: const Text('Check In'),
           content: Text(
-            'Check in ${selectedBookings.length} selected passengers?\n\nThis will move the trip to history and remove it from today\'s schedule.',
+            'Check in ${selectedBookings.length} selected passengers?\n\nThis will complete the trip and stop location sharing.',
           ),
           actions: [
             TextButton(
@@ -532,108 +801,115 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
   }
 
   Future<void> _performCheckIn() async {
-  try {
-    // Parse the trip date from scheduleData
-    final String? tripDateStr = widget.scheduleData['date'];
-    if (tripDateStr == null) {
+    try {
+      // Parse the trip date from scheduleData
+      final String? tripDateStr = widget.scheduleData['date'];
+      if (tripDateStr == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Trip has no date set'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Normalize both trip date and today's date to yyyy-MM-dd
+      final tripDate = DateTime.tryParse(tripDateStr);
+      final today = DateTime.now();
+      final todayStr =
+          "${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
+
+      if (tripDate == null || tripDateStr != todayStr) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("This trip is not scheduled for today"),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator()),
+      );
+
+      // Clean up location data using the global service
+      await _locationService.cleanupLocationData(widget.scheduleId);
+
+      // Update schedule status to completed
+      await FirebaseFirestore.instance
+          .collection('schedules')
+          .doc(widget.scheduleId)
+          .update({
+            'status': 'completed',
+            'completedAt': FieldValue.serverTimestamp(),
+            'checkedInPassengers': selectedBookings.toList(),
+            'locationSharingActive': false,
+          });
+
+      // Update booking statuses for selected passengers
+      for (String bookingId in selectedBookings) {
+        await FirebaseFirestore.instance
+            .collection('bookings')
+            .doc(bookingId)
+            .update({
+              'status': 'checked_in',
+              'checkedInAt': FieldValue.serverTimestamp(),
+            });
+      }
+
+      // Create history entry
+      await FirebaseFirestore.instance.collection('trip_history').add({
+        'scheduleId': widget.scheduleId,
+        'scheduleData': widget.scheduleData,
+        'routeDisplay': routeDisplay,
+        'checkedInPassengers': selectedBookings.toList(),
+        'totalPassengers': bookings.length,
+        'checkedInCount': selectedBookings.length,
+        'completedAt': FieldValue.serverTimestamp(),
+        'date': widget.scheduleData['date'],
+        'time': widget.scheduleData['time'],
+        'routeId': widget.scheduleData['routeId'],
+      });
+
+      // Hide loading indicator
+      Navigator.pop(context);
+
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Successfully checked in ${selectedBookings.length} passengers',
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      // Update UI to reflect that location sharing stopped
+      setState(() {
+        isLocationSharing = false;
+      });
+
+      // Navigate to history page
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const HistoryPage()),
+      );
+    } catch (e) {
+      // Hide loading indicator
+      Navigator.pop(context);
+
+      print('Error during check-in: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Trip has no date set'),
+          content: Text('Something went wrong during check-in'),
           backgroundColor: Colors.red,
         ),
       );
-      return;
     }
-
-    // Normalize both trip date and today's date to yyyy-MM-dd
-    final tripDate = DateTime.tryParse(tripDateStr);
-    final today = DateTime.now();
-    final todayStr =
-        "${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
-
-    if (tripDate == null || tripDateStr != todayStr) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("This trip is not scheduled for today"),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    // Show loading indicator
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(child: CircularProgressIndicator()),
-    );
-
-    // Update schedule status to completed
-    await FirebaseFirestore.instance
-        .collection('schedules')
-        .doc(widget.scheduleId)
-        .update({
-      'status': 'completed',
-      'completedAt': FieldValue.serverTimestamp(),
-      'checkedInPassengers': selectedBookings.toList(),
-    });
-
-    // Update booking statuses for selected passengers
-    for (String bookingId in selectedBookings) {
-      await FirebaseFirestore.instance
-          .collection('bookings')
-          .doc(bookingId)
-          .update({
-        'status': 'checked_in',
-        'checkedInAt': FieldValue.serverTimestamp(),
-      });
-    }
-
-    // Create history entry
-    await FirebaseFirestore.instance.collection('trip_history').add({
-      'scheduleId': widget.scheduleId,
-      'scheduleData': widget.scheduleData,
-      'routeDisplay': routeDisplay,
-      'checkedInPassengers': selectedBookings.toList(),
-      'totalPassengers': bookings.length,
-      'checkedInCount': selectedBookings.length,
-      'completedAt': FieldValue.serverTimestamp(),
-      'date': widget.scheduleData['date'],
-      'time': widget.scheduleData['time'],
-      'routeId': widget.scheduleData['routeId'],
-    });
-
-    // Hide loading indicator
-    Navigator.pop(context);
-
-    // Show success message
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Successfully checked in ${selectedBookings.length} passengers',
-        ),
-        backgroundColor: Colors.green,
-      ),
-    );
-
-    // Navigate to history page
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const HistoryPage()),
-    );
-  } catch (e) {
-    // Hide loading indicator
-    Navigator.pop(context);
-
-    print('Error during check-in: $e');
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Something went wrong during check-in'),
-        backgroundColor: Colors.red,
-      ),
-    );
   }
 }
-
-}
-
