@@ -1,9 +1,11 @@
 import 'package:driver_vango/pages/history_page.dart';
-import 'package:driver_vango/services/location_service.dart'; // Import the location service
+import 'package:driver_vango/services/location_service.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'qr_scanner_page.dart'; // Add this import
 
 class TripDetailsPage extends StatefulWidget {
   final String scheduleId;
@@ -116,7 +118,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       }
 
       print(
-        '📍 Location sharing status: local=$isTrackingThisSchedule, firestore=$firestoreStatus, hasData=$hasLocationData, final=$actualStatus',
+        'Location sharing status: local=$isTrackingThisSchedule, firestore=$firestoreStatus, hasData=$hasLocationData, final=$actualStatus',
       );
 
       // REMOVED: Auto-restart logic - let user manually start if needed
@@ -185,7 +187,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
 
       // ScaffoldMessenger.of(context).showSnackBar(
       //   const SnackBar(
-      //     content: Text('📍 Location sharing stopped.'),
+      //     content: Text('Location sharing stopped.'),
       //     backgroundColor: Colors.orange,
       //   ),
       // );
@@ -707,21 +709,92 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
       child: Column(
         children: [
-          // Check in button
+          // QR Scanner Button with permission check
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () => _showCheckInDialog(),
+            child: ElevatedButton.icon(
+              onPressed: () async {
+                print('🔍 QR Scanner button pressed');
+
+                try {
+                  final result = await Navigator.push<List<String>>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => QRScannerPage(
+                        scheduleId: widget.scheduleId,
+                        scheduleData: widget.scheduleData,
+                      ),
+                    ),
+                  );
+
+                  if (result != null && result.isNotEmpty) {
+                    setState(() {
+                      selectedBookings.addAll(result);
+                    });
+
+                    for (String bookingId in result) {
+                      final bookingIndex = bookings.indexWhere(
+                        (b) => b['id'] == bookingId,
+                      );
+                      if (bookingIndex != -1) {
+                        bookings[bookingIndex]['isSelected'] = true;
+                      }
+                    }
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          '${result.length} passengers checked in via QR',
+                        ),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+
+                    _loadBookings();
+                  }
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error opening QR scanner: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
+                backgroundColor: Colors.blue[600],
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
               ),
-              child: const Text(
-                'Check In Passengers',
+              icon: const Icon(Icons.qr_code_scanner),
+              label: const Text(
+                'Scan QR Codes',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // Manual Check in button (unchanged)
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _showCheckInDialog(),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.blue[600],
+                side: BorderSide(color: Colors.blue[300]!),
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              icon: const Icon(Icons.how_to_reg),
+              label: const Text(
+                'Manual Check In',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
             ),
