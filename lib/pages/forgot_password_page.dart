@@ -19,9 +19,9 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
 
   Future<void> passwordReset() async {
     if (_emailController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter your email.")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Please enter your email.")));
       return;
     }
 
@@ -41,7 +41,9 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       Navigator.pop(context); // close loading
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Password reset link sent! Check your email.")),
+        const SnackBar(
+          content: Text("Password reset link sent! Check your email."),
+        ),
       );
     } on FirebaseAuthException catch (e) {
       if (mounted) Navigator.pop(context); // close loading if error
@@ -52,9 +54,9 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       } else if (e.code == "invalid-email") {
         message = "Invalid email address.";
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
@@ -73,7 +75,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Text(
-              "Enter your email and we’ll send you a password reset link.",
+              "Enter your email and we'll send you a password reset link.",
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 16, color: Colors.black87),
             ),
@@ -100,7 +102,10 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.blue,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 32),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 16,
+                  horizontal: 32,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -110,18 +115,9 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
             ),
-
-            const SizedBox(height: 16),
-
-            // Back to login
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Back to Login"),
-            ),
           ],
         ),
       ),
     );
   }
 }
-

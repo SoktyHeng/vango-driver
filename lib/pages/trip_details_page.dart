@@ -4,9 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'qr_scanner_page.dart'; // Add this import
-
+import 'qr_scanner_page.dart';
 class TripDetailsPage extends StatefulWidget {
   final String scheduleId;
   final Map<String, dynamic> scheduleData;

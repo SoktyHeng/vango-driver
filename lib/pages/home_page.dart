@@ -17,10 +17,26 @@ class _HomePageState extends State<HomePage> {
   bool isLoading = true;
   String? errorMessage;
 
+  // Add these state variables for van info
+  String currentVanId = 'N/A';
+  String currentVanLicense = 'N/A';
+
+  // Add state variable for showing more schedules
+  bool showMoreSchedules = false;
+
+  // Add scroll controller to maintain position
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
     _loadDriverData();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadDriverData() async {
@@ -48,15 +64,21 @@ class _HomePageState extends State<HomePage> {
 
       if (querySnapshot.docs.isNotEmpty) {
         final driverData = querySnapshot.docs.first.data();
-        final driverId =
-            querySnapshot.docs.first.id; // Use document ID instead of user.uid
+        final driverId = querySnapshot.docs.first.id;
+
+        // Load van info along with driver data
+        final vanInfo = await _getCurrentDriverVan(driverId);
+
         setState(() {
           currentDriverId = driverId;
           currentDriverName = driverData['name'] ?? 'Driver';
+          currentVanId = vanInfo['vanId']!;
+          currentVanLicense = vanInfo['license']!;
           isLoading = false;
         });
 
         print('Driver loaded: $currentDriverName with ID: $currentDriverId');
+        print('Van loaded: $currentVanId - $currentVanLicense');
 
         // Test query to see if any schedules exist
         _testScheduleQuery();
@@ -71,6 +93,33 @@ class _HomePageState extends State<HomePage> {
         errorMessage = 'Error loading driver data: $e';
         isLoading = false;
       });
+    }
+  }
+
+  // Modified method to accept driverId parameter
+  Future<Map<String, String>> _getCurrentDriverVan(String driverId) async {
+    try {
+      // Get today's schedule to find the assigned van
+      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final scheduleSnapshot = await FirebaseFirestore.instance
+          .collection('schedules')
+          .where('driverId', isEqualTo: driverId)
+          .where('date', isEqualTo: today)
+          .limit(1)
+          .get();
+
+      if (scheduleSnapshot.docs.isNotEmpty) {
+        final scheduleData = scheduleSnapshot.docs.first.data();
+        return {
+          'vanId': scheduleData['vanId'] ?? 'N/A',
+          'license': scheduleData['vanLicense'] ?? 'N/A',
+        };
+      }
+
+      return {'vanId': 'N/A', 'license': 'N/A'};
+    } catch (e) {
+      print('Error fetching van info: $e');
+      return {'vanId': 'N/A', 'license': 'N/A'};
     }
   }
 
@@ -139,6 +188,7 @@ class _HomePageState extends State<HomePage> {
               : RefreshIndicator(
                   onRefresh: _loadDriverData,
                   child: CustomScrollView(
+                    controller: _scrollController, // Add controller here
                     slivers: [
                       SliverToBoxAdapter(
                         child: Container(
@@ -189,17 +239,24 @@ class _HomePageState extends State<HomePage> {
                                       ),
                                     ),
                                     const SizedBox(height: 8),
-                                    Text(
-                                      'Today is ${DateFormat('EEEE, MMMM d').format(DateTime.now())}',
-                                      style: TextStyle(
-                                        color: Colors.white.withOpacity(0.8),
-                                        fontSize: 14,
-                                      ),
+                                    // Current Van Info
+                                    Row(
+                                      children: [
+                                        Text(
+                                          'Van: $currentVanId • $currentVanLicense',
+                                          style: TextStyle(
+                                            color: Colors.white.withOpacity(
+                                              0.9,
+                                            ),
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
                               ),
-                              const SizedBox(height: 24),
+                              const SizedBox(height: 34),
 
                               // Today's Schedule Section
                               Text(
@@ -210,7 +267,7 @@ class _HomePageState extends State<HomePage> {
                                   color: Colors.grey[800],
                                 ),
                               ),
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 10),
                             ],
                           ),
                         ),
@@ -223,11 +280,13 @@ class _HomePageState extends State<HomePage> {
                       SliverToBoxAdapter(
                         child: Container(
                           color: Colors.white,
-                          padding: const EdgeInsets.all(20.0),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20.0,
+                            vertical: 16.0,
+                          ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const SizedBox(height: 24),
                               Text(
                                 'Upcoming Schedules',
                                 style: TextStyle(
@@ -290,7 +349,7 @@ class _HomePageState extends State<HomePage> {
           return aTime.compareTo(bTime);
         });
 
-        // ✅ Take only 5
+        // Take only 5
         final limitedSchedules = schedules.take(5).toList();
 
         if (limitedSchedules.isEmpty) {
@@ -313,32 +372,65 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildUpcomingSchedules() {
     final today = DateTime.now();
-    final tomorrow = DateTime(today.year, today.month, today.day + 1);
-    final tomorrowStr = DateFormat('yyyy-MM-dd').format(tomorrow);
 
+    // Determine how many days to show based on state
+    final daysToShow = showMoreSchedules ? 5 : 1;
+
+    return Column(
+      children: [
+        // Generate schedule widgets for each day
+        ...List.generate(daysToShow, (index) {
+          final targetDate = DateTime(
+            today.year,
+            today.month,
+            today.day + 1 + index,
+          );
+          final dateStr = DateFormat('yyyy-MM-dd').format(targetDate);
+          final isFirstDay = index == 0; // Tomorrow
+
+          return _buildDaySchedule(dateStr, targetDate, isFirstDay);
+        }),
+
+        // Show More / Show Less button
+        if (!showMoreSchedules) _buildShowMoreButton(),
+        if (showMoreSchedules) _buildShowLessButton(),
+      ],
+    );
+  }
+
+  Widget _buildDaySchedule(String dateStr, DateTime date, bool isFirstDay) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('schedules')
           .where('driverId', isEqualTo: currentDriverId)
-          .where('date', isEqualTo: tomorrowStr)
+          .where('date', isEqualTo: dateStr)
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return _buildErrorWidget(
-            'Error loading upcoming schedules: ${snapshot.error}',
+            'Error loading schedules for ${DateFormat('MMM dd').format(date)}: ${snapshot.error}',
           );
         }
 
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Padding(
-            padding: EdgeInsets.all(20.0),
-            child: Center(child: CircularProgressIndicator()),
+          return Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Center(
+              child: SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.grey[400],
+                ),
+              ),
+            ),
           );
         }
 
         final allSchedules = snapshot.data?.docs ?? [];
 
-        // Exclude completed
+        // Exclude completed schedules
         final schedules = allSchedules.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
           return data['status'] != 'completed';
@@ -351,24 +443,157 @@ class _HomePageState extends State<HomePage> {
           return aTime.compareTo(bTime);
         });
 
-        // ✅ Take only 6
-        final limitedSchedules = schedules.take(6).toList();
-
-        if (limitedSchedules.isEmpty) {
-          return _buildEmptyScheduleWidget('No trips for tomorrow');
+        // If no schedules for this day, don't show anything for any day
+        if (schedules.isEmpty) {
+          return const SizedBox.shrink();
         }
 
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0),
-          child: Column(
-            children: limitedSchedules.map((doc) {
-              final schedule = doc.data() as Map<String, dynamic>;
-              schedule['scheduleId'] = doc.id;
-              return _buildScheduleCard(schedule, isToday: false);
-            }).toList(),
-          ),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Day header - show for all days with specific date format
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20.0,
+                vertical: 8.0,
+              ),
+              child: Text(
+                DateFormat(
+                  'EEEE, MMM dd, yyyy',
+                ).format(date), // Show full date with year
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[700],
+                ),
+              ),
+            ),
+
+            // Schedule cards
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20.0),
+              child: Column(
+                children: schedules.map((doc) {
+                  final schedule = doc.data() as Map<String, dynamic>;
+                  schedule['scheduleId'] = doc.id;
+                  return _buildScheduleCard(schedule, isToday: false);
+                }).toList(),
+              ),
+            ),
+
+            // Add spacing after each day
+            const SizedBox(height: 16),
+          ],
         );
       },
+    );
+  }
+
+  Widget _buildShowMoreButton() {
+    return Container(
+      margin: const EdgeInsets.only(top: 16, bottom: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 20.0),
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: () async {
+          // Store current scroll position
+          final currentPosition = _scrollController.offset;
+
+          setState(() {
+            showMoreSchedules = true;
+          });
+
+          // Wait for rebuild and restore position
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_scrollController.hasClients) {
+              _scrollController.animateTo(
+                currentPosition,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+              );
+            }
+          });
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.grey[100],
+          foregroundColor: Colors.grey[700],
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Colors.grey[300]!),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              'Show More',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey[700],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(Icons.keyboard_arrow_down, color: Colors.grey[700]),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildShowLessButton() {
+    return Container(
+      margin: const EdgeInsets.only(top: 16, bottom: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 20.0),
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: () async {
+          // Store current scroll position
+          final currentPosition = _scrollController.offset;
+
+          setState(() {
+            showMoreSchedules = false;
+          });
+
+          // Wait for rebuild and restore position
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_scrollController.hasClients) {
+              _scrollController.animateTo(
+                currentPosition,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+              );
+            }
+          });
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.grey[100],
+          foregroundColor: Colors.grey[700],
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Colors.grey[300]!),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              'Show Less',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey[700],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(Icons.keyboard_arrow_up, color: Colors.grey[700]),
+          ],
+        ),
+      ),
     );
   }
 
@@ -385,14 +610,6 @@ class _HomePageState extends State<HomePage> {
 
     // Safe parsing of numeric fields
     final seatsTotal = _parseToInt(schedule['seatsTotal']) ?? 0;
-
-    // Parse date for display
-    DateTime? scheduleDate;
-    try {
-      scheduleDate = DateFormat('yyyy-MM-dd').parse(date);
-    } catch (e) {
-      scheduleDate = null;
-    }
 
     return GestureDetector(
       onTap: () {
@@ -418,100 +635,30 @@ class _HomePageState extends State<HomePage> {
           ],
           border: isToday
               ? Border.all(color: Colors.blue[300]!, width: 2)
-              : Border.all(
-                  color: Colors.green[300]!,
-                  width: 1.5,
-                ), // Added border for upcoming schedules
+              : Border.all(color: Colors.green[300]!, width: 1.5),
         ),
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header Row
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isToday
-                          ? Colors.blue[50]
-                          : Colors
-                                .green[50], // Changed background color for upcoming
-                      borderRadius: BorderRadius.circular(20),
-                      border: isToday
-                          ? Border.all(color: Colors.blue[300]!)
-                          : Border.all(
-                              color: Colors.green[300]!,
-                            ), // Added border for upcoming
-                    ),
-                    child: Text(
-                      isToday
-                          ? 'TODAY'
-                          : scheduleDate != null
-                          ? DateFormat('MMM dd').format(scheduleDate)
-                          : date,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: isToday
-                            ? Colors.blue[700]
-                            : Colors
-                                  .green[700], // Changed text color for upcoming
-                      ),
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.access_time,
-                        size: 16,
-                        color: Colors.grey[600],
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        time,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey[700],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 16),
-
-              // Route Info
+              // Route Info (moved up since we removed the header row)
               Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.blue[50],
-                      borderRadius: BorderRadius.circular(8),
+                  const SizedBox(width: 4),
+                  Text(
+                    time,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[800],
                     ),
-                    child: Icon(Icons.route, size: 20, color: Colors.blue[600]),
                   ),
-                  const SizedBox(width: 12),
+                  const Spacer(),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'Route',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
                         FutureBuilder<String>(
                           future: _getRouteDisplay(routeId),
                           builder: (context, snapshot) {
@@ -520,16 +667,16 @@ class _HomePageState extends State<HomePage> {
                               return Text(
                                 'Loading...',
                                 style: TextStyle(
-                                  fontSize: 16,
+                                  fontSize: 18,
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.grey[500],
+                                  color: Colors.grey[800],
                                 ),
                               );
                             }
                             return Text(
                               snapshot.data ?? routeId,
                               style: TextStyle(
-                                fontSize: 16,
+                                fontSize: 18,
                                 fontWeight: FontWeight.w600,
                                 color: Colors.grey[800],
                               ),
@@ -542,51 +689,7 @@ class _HomePageState extends State<HomePage> {
                 ],
               ),
 
-              const SizedBox(height: 16),
-
-              // Van Info
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.green[50],
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      Icons.directions_bus,
-                      size: 20,
-                      color: Colors.green[600],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Van',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        Text(
-                          '$vanId • $vanLicense',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey[800],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
 
               // Seats Info - Use FutureBuilder to calculate taken seats dynamically
               FutureBuilder<int>(
