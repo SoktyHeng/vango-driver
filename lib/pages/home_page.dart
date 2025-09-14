@@ -313,6 +313,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildTodaySchedule() {
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final todayDate = DateTime.now();
 
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -356,15 +357,40 @@ class _HomePageState extends State<HomePage> {
           return _buildEmptyScheduleWidget('No schedules for today');
         }
 
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0),
-          child: Column(
-            children: limitedSchedules.map((doc) {
-              final schedule = doc.data() as Map<String, dynamic>;
-              schedule['scheduleId'] = doc.id;
-              return _buildScheduleCard(schedule, isToday: true);
-            }).toList(),
-          ),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Today's date header
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20.0,
+                vertical: 8.0,
+              ),
+              child: Text(
+                DateFormat('EEEE, MMM dd, yyyy').format(todayDate),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[700],
+                ),
+              ),
+            ),
+
+            // Schedule cards
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20.0),
+              child: Column(
+                children: limitedSchedules.map((doc) {
+                  final schedule = doc.data() as Map<String, dynamic>;
+                  schedule['scheduleId'] = doc.id;
+                  return _buildScheduleCard(schedule, isToday: true);
+                }).toList(),
+              ),
+            ),
+
+            // Add spacing after today's schedules
+            const SizedBox(height: 16),
+          ],
         );
       },
     );
