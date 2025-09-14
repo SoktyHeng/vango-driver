@@ -668,10 +668,10 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Route Info (moved up since we removed the header row)
+              // Route Info - Modified to push text to the right
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const SizedBox(width: 4),
                   Text(
                     time,
                     style: TextStyle(
@@ -680,37 +680,28 @@ class _HomePageState extends State<HomePage> {
                       color: Colors.grey[800],
                     ),
                   ),
-                  const Spacer(),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        FutureBuilder<String>(
-                          future: _getRouteDisplay(routeId),
-                          builder: (context, snapshot) {
-                            if (snapshot.connectionState ==
-                                ConnectionState.waiting) {
-                              return Text(
-                                'Loading...',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.grey[800],
-                                ),
-                              );
-                            }
-                            return Text(
-                              snapshot.data ?? routeId,
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.grey[800],
-                              ),
-                            );
-                          },
+                  FutureBuilder<String>(
+                    future: _getRouteDisplay(routeId),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return Text(
+                          'Loading...',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey[800],
+                          ),
+                        );
+                      }
+                      return Text(
+                        snapshot.data ?? routeId,
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey[800],
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
                 ],
               ),
