@@ -21,8 +21,11 @@ class _HomePageState extends State<HomePage> {
   String currentVanId = 'N/A';
   String currentVanLicense = 'N/A';
 
-  // Add state variable for showing more schedules
-  bool showMoreSchedules = false;
+  // Modified state variables for progressive showing
+  int daysToShow = 1; // Start with showing 1 day (tomorrow)
+  int totalDaysWithSchedules = 0;
+  int totalRoutesRemaining = 0;
+  bool isCalculatingStats = false;
 
   // Add scroll controller to maintain position
   final ScrollController _scrollController = ScrollController();
@@ -82,6 +85,9 @@ class _HomePageState extends State<HomePage> {
 
         // Test query to see if any schedules exist
         _testScheduleQuery();
+        
+        // Calculate initial stats
+        _calculateRemainingStats();
       } else {
         setState(() {
           errorMessage = 'Driver data not found';
@@ -92,6 +98,59 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         errorMessage = 'Error loading driver data: $e';
         isLoading = false;
+      });
+    }
+  }
+
+  // New method to calculate remaining days and routes
+  Future<void> _calculateRemainingStats() async {
+    if (currentDriverId == null) return;
+
+    setState(() {
+      isCalculatingStats = true;
+    });
+
+    try {
+      final today = DateTime.now();
+      int daysWithSchedules = 0;
+      int totalRoutes = 0;
+      
+      // Check next 30 days for schedules
+      for (int i = 1; i <= 30; i++) {
+        final checkDate = DateTime(today.year, today.month, today.day + i);
+        final dateStr = DateFormat('yyyy-MM-dd').format(checkDate);
+        
+        final schedulesSnapshot = await FirebaseFirestore.instance
+            .collection('schedules')
+            .where('driverId', isEqualTo: currentDriverId)
+            .where('date', isEqualTo: dateStr)
+            .get();
+
+        if (schedulesSnapshot.docs.isNotEmpty) {
+          // Count non-completed schedules
+          final activeSchedules = schedulesSnapshot.docs.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return data['status'] != 'completed';
+          }).toList();
+          
+          if (activeSchedules.isNotEmpty) {
+            daysWithSchedules++;
+            totalRoutes += activeSchedules.length;
+          }
+        }
+      }
+
+      setState(() {
+        totalDaysWithSchedules = daysWithSchedules;
+        totalRoutesRemaining = totalRoutes;
+        isCalculatingStats = false;
+      });
+
+      print('Calculated stats: $daysWithSchedules days with $totalRoutes routes');
+    } catch (e) {
+      print('Error calculating stats: $e');
+      setState(() {
+        isCalculatingStats = false;
       });
     }
   }
@@ -186,9 +245,12 @@ class _HomePageState extends State<HomePage> {
                   ),
                 )
               : RefreshIndicator(
-                  onRefresh: _loadDriverData,
+                  onRefresh: () async {
+                    await _loadDriverData();
+                    await _calculateRemainingStats();
+                  },
                   child: CustomScrollView(
-                    controller: _scrollController, // Add controller here
+                    controller: _scrollController,
                     slivers: [
                       SliverToBoxAdapter(
                         child: Container(
@@ -399,9 +461,6 @@ class _HomePageState extends State<HomePage> {
   Widget _buildUpcomingSchedules() {
     final today = DateTime.now();
 
-    // Determine how many days to show based on state
-    final daysToShow = showMoreSchedules ? 5 : 1;
-
     return Column(
       children: [
         // Generate schedule widgets for each day
@@ -417,9 +476,8 @@ class _HomePageState extends State<HomePage> {
           return _buildDaySchedule(dateStr, targetDate, isFirstDay);
         }),
 
-        // Show More / Show Less button
-        if (!showMoreSchedules) _buildShowMoreButton(),
-        if (showMoreSchedules) _buildShowLessButton(),
+        // Progressive Show More/Less button
+        _buildProgressiveShowButton(),
       ],
     );
   }
@@ -515,110 +573,165 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildShowMoreButton() {
+  // New progressive show button that updates based on remaining schedules
+  Widget _buildProgressiveShowButton() {
+    // Calculate days already shown (excluding today)
+    final daysShown = daysToShow;
+    final remainingDays = totalDaysWithSchedules - daysShown;
+    
+    // Calculate remaining routes for days not yet shown
+    int remainingRoutes = 0;
+    if (remainingDays > 0) {
+      // Estimate remaining routes based on total routes and what's already shown
+      final averageRoutesPerDay = totalRoutesRemaining > 0 && totalDaysWithSchedules > 0 
+          ? (totalRoutesRemaining / totalDaysWithSchedules).round()
+          : 0;
+      remainingRoutes = (remainingDays * averageRoutesPerDay).round();
+    }
+    
+    // If no more days to show, don't display the button
+    if (remainingDays <= 0 && !isCalculatingStats) {
+      return const SizedBox.shrink();
+    }
+
+    // Calculate how many more days to show (up to 5)
+    final nextIncrement = remainingDays > 5 ? 5 : remainingDays;
+    
     return Container(
       margin: const EdgeInsets.only(top: 16, bottom: 20),
       padding: const EdgeInsets.symmetric(horizontal: 20.0),
       width: double.infinity,
-      child: ElevatedButton(
-        onPressed: () async {
-          // Store current scroll position
-          final currentPosition = _scrollController.offset;
+      child: Column(
+        children: [
+          // Show More Button
+          ElevatedButton(
+            onPressed: isCalculatingStats ? null : () async {
+              // Store current scroll position
+              final currentPosition = _scrollController.offset;
 
-          setState(() {
-            showMoreSchedules = true;
-          });
+              setState(() {
+                daysToShow += 5; // Always increment by 5
+              });
 
-          // Wait for rebuild and restore position
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_scrollController.hasClients) {
-              _scrollController.animateTo(
-                currentPosition,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeInOut,
-              );
-            }
-          });
-        },
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.grey[100],
-          foregroundColor: Colors.grey[700],
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Colors.grey[300]!),
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              'Show More',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                color: Colors.grey[700],
+              // Recalculate stats after showing more
+              await _calculateRemainingStats();
+
+              // Wait for rebuild and restore position
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (_scrollController.hasClients) {
+                  _scrollController.animateTo(
+                    currentPosition,
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeInOut,
+                  );
+                }
+              });
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue[50],
+              foregroundColor: Colors.blue[700],
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: Colors.blue[200]!),
               ),
             ),
-            const SizedBox(width: 8),
-            Icon(Icons.keyboard_arrow_down, color: Colors.grey[700]),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildShowLessButton() {
-    return Container(
-      margin: const EdgeInsets.only(top: 16, bottom: 20),
-      padding: const EdgeInsets.symmetric(horizontal: 20.0),
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: () async {
-          // Store current scroll position
-          final currentPosition = _scrollController.offset;
-
-          setState(() {
-            showMoreSchedules = false;
-          });
-
-          // Wait for rebuild and restore position
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_scrollController.hasClients) {
-              _scrollController.animateTo(
-                currentPosition,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeInOut,
-              );
-            }
-          });
-        },
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.grey[100],
-          foregroundColor: Colors.grey[700],
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Colors.grey[300]!),
+            child: isCalculatingStats
+                ? Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.blue[700],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Loading...',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.blue[700],
+                        ),
+                      ),
+                    ],
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.expand_more, color: Colors.blue[700]),
+                      const SizedBox(width: 8),
+                      Column(
+                        children: [
+                          Text(
+                            'Show More Schedules',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.blue[700],
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            remainingDays > 0
+                                ? '$remainingDays more days with $remainingRoutes routes'
+                                : 'Loading schedule info...',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.blue[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
           ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              'Show Less',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                color: Colors.grey[700],
+          
+          // Show Less Button (only show if we've expanded beyond initial view)
+          if (daysToShow > 1) ...[
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () async {
+                // Store current scroll position
+                final currentPosition = _scrollController.offset;
+
+                setState(() {
+                  daysToShow = 1; // Reset to initial state
+                });
+
+                // Wait for rebuild and restore position
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (_scrollController.hasClients) {
+                    _scrollController.animateTo(
+                      currentPosition,
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                    );
+                  }
+                });
+              },
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.expand_less, color: Colors.grey[600]),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Show Less',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 8),
-            Icon(Icons.keyboard_arrow_up, color: Colors.grey[700]),
           ],
-        ),
+        ],
       ),
     );
   }

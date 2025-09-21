@@ -31,16 +31,20 @@
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSCameraUsageDescription</key>
-	<string>Camera permission is required for barcode scanning.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>This app needs microphone access for camera functionality</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_dartobservatory._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>This app needs access to local network for debugging and development purposes</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Van Go needs location access to track your ride and show driver location</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>Van Go needs location access to track your ride and show driver location</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Van Go needs location access to track your ride and show driver location</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>This app needs microphone access for camera functionality</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>This app needs access to photo library to select profile pictures</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
